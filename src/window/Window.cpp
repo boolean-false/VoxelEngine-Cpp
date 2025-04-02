@@ -343,7 +343,7 @@ void Window::pushScissor(glm::vec4 area) {
 
 void Window::popScissor() {
     if (scissorStack.empty()) {
-        logger.warning() << "extra Window::popScissor call";
+        logger.warning() << "extra Window::popScissor call2";
         return;
     }
     glm::vec4 area = scissorStack.top();
