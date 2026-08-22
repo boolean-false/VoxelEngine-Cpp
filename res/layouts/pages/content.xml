@@ -15,7 +15,7 @@
         <textbox id='search_textbox' multiline='false' size='440,25' sub-consumer='function(x) refresh_search() end'></textbox>  
     </panel>  
   
-    <image onclick='core.open_folder("user:content")' interactive='true' src='gui/folder_icon'   
+    <image onclick='app.open_folder("user:content")' interactive='true' src='gui/folder_icon'   
         size='32' margin='0,0,18,66' gravity='bottom-right'  
         color='#FFFFFF50' hover-color='#FFFFFF10'/>  
   
@@ -31,11 +31,11 @@
         size='32' margin='0,0,425,64' gravity='bottom-right'  
         color='#FFFFFF50' hover-color='#FFFFFF10'/>  
   
-    <panel id='packs_add' pos='485,34' size='440,507' color='0' max-length='455' scrollable='true'>  
+    <panel id='packs_add' pos='485,34' size='440,455' color='0' max-length='455' scrollable='true'>  
         <!-- content is generated in script -->  
     </panel>  
   
-    <panel id='packs_cur' pos='15,34' size='440,507' color='0' max-length='455' scrollable='true'>  
+    <panel id='packs_cur' pos='15,34' size='440,455' color='0' max-length='455' scrollable='true'>  
         <!-- content is generated in script -->  
     </panel>  
 </container>

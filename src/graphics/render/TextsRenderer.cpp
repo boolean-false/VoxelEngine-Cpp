@@ -4,18 +4,24 @@
 #include "maths/util.hpp"
 #include "assets/Assets.hpp"
 #include "window/Camera.hpp"
-#include "window/Window.hpp"
 #include "maths/FrustumCulling.hpp"
 #include "graphics/core/Font.hpp"
 #include "graphics/core/Batch3D.hpp"
 #include "graphics/core/Shader.hpp"
+#include "graphics/core/DrawContext.hpp"
 #include "presets/NotePreset.hpp"
+#include "world/Level.hpp"
+#include "objects/Entities.hpp"
+#include "objects/Entity.hpp"
 #include "constants.hpp"
 
 TextsRenderer::TextsRenderer(
-    Batch3D& batch, const Assets& assets, const Frustum& frustum
+    const Level& level,
+    Batch3D& batch,
+    const Assets& assets,
+    const Frustum& frustum
 )
-    : batch(batch), assets(assets), frustum(frustum) {
+    : level(level), batch(batch), assets(assets), frustum(frustum) {
 }
 
 void TextsRenderer::renderNote(
@@ -31,6 +37,13 @@ void TextsRenderer::renderNote(
     const auto& preset = note.getPreset();
     auto pos = note.getPosition();
 
+    entityid_t eid = note.getEntity();
+    if (eid != ENTITY_NONE) {
+        if (auto entity = level.entities->get(eid)) {
+            pos += entity->getTransform().displayPos;
+        }
+    }
+
     if (util::distance2(pos, camera.position) >
         util::sqr(preset.renderDistance / camera.zoom)) {
         return;
@@ -45,12 +58,16 @@ void TextsRenderer::renderNote(
         }
         opacity = preset.xrayOpacity;
     }
-    const auto& font = assets.require<Font>(FONT_DEFAULT);
+
+    auto specifiedFont = assets.get<Font>(preset.font);
+    auto& font =
+        specifiedFont ? *specifiedFont : assets.require<Font>(FONT_DEFAULT);
 
     glm::vec3 xvec = note.getAxisX();
     glm::vec3 yvec = note.getAxisY();
 
     int width = font.calcWidth(text, text.length());
+    int height = font.getLineHeight();
     if (preset.displayMode == NoteDisplayMode::Y_FREE_BILLBOARD ||
         preset.displayMode == NoteDisplayMode::XY_FREE_BILLBOARD) {
         xvec = camera.position - pos;
@@ -62,17 +79,20 @@ void TextsRenderer::renderNote(
             yvec = camera.up;
         }
         float scale =
-            (1.0f - preset.perspective) * glm::pow(glm::distance(camera.position, pos), 1.0f-preset.perspective);
+            (1.0f - preset.perspective) *
+            glm::pow(
+                glm::distance(camera.position, pos), 1.0f - preset.perspective
+            );
         xvec *= 1.0f + scale;
         yvec *= 1.0f + scale;
     }
+    const auto& viewport = context.getViewport();
     if (preset.displayMode == NoteDisplayMode::PROJECTED) {
         float scale = 1.0f;
         if (glm::abs(preset.perspective) > 0.0001f) {
-            float scale2 = scale /
-                (glm::distance(camera.position, pos) *
-                            util::sqr(camera.zoom) *
-                            glm::sqrt(glm::tan(camera.getFov() * 0.5f)));
+            float scale2 =
+                scale / (glm::distance(camera.position, pos) * camera.zoom *
+                         glm::sqrt(glm::tan(camera.getFov() * 0.5f)));
             scale = scale2 * preset.perspective +
                     scale * (1.0f - preset.perspective);
         }
@@ -84,23 +104,27 @@ void TextsRenderer::renderNote(
             }
             pos /= projpos.w;
             pos.z = 0;
-            xvec = {2.0f/Window::width*scale, 0, 0};
-            yvec = {0, 2.0f/Window::height*scale, 0};
+            xvec = {2.0f / viewport.x * scale, 0, 0};
+            yvec = {0, 2.0f / viewport.y * scale, 0};
         } else {
             auto matrix = camera.getProjView();
             auto screenPos = matrix * glm::vec4(pos, 1.0f);
-            
-            xvec = glm::vec3(2.0f/Window::width*scale, 0, 0);
-            yvec = glm::vec3(0, 2.0f/Window::height*scale, 0);
+
+            xvec = glm::vec3(2.0f / viewport.x * scale, 0, 0);
+            yvec = glm::vec3(0, 2.0f / viewport.y * scale, 0);
 
             pos = screenPos / screenPos.w;
         }
-    } else if (!frustum.isBoxVisible(pos - xvec * (width * 0.5f * preset.scale), 
-                                     pos + xvec * (width * 0.5f * preset.scale))) {
+    } else if (!frustum.isBoxVisible(
+                   pos - xvec * (width * 0.5f) * preset.scale,
+                   pos + xvec * (width * 0.5f) * preset.scale +
+                       yvec * static_cast<float>(height) * preset.scale
+               )) {
         return;
     }
     auto color = preset.color;
     batch.setColor(glm::vec4(color.r, color.g, color.b, color.a * opacity));
+
     font.draw(
         batch,
         text,

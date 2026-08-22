@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <cstdint>
 
 class Engine;
 class World;
@@ -40,5 +41,5 @@ public:
 
     void setLocalPlayer(int64_t player);
 
-    void reopenWorld(World* world);
+    void reopenWorld(World& world);
 };

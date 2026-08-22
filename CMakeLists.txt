@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.26)
+cmake_minimum_required(VERSION 3.5)
 project(VoxelEngine)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -9,6 +9,8 @@ execute_process(COMMAND ${CMAKE_COMMAND} --version)
 
 option(VOXELENGINE_BUILD_APPDIR "Pack linux build" OFF)
 option(VOXELENGINE_BUILD_TESTS "Build tests" OFF)
+
+add_compile_definitions(VC_BUILD_NAME="${VC_BUILD_NAME}")
 
 # Need for static compilation on Windows with MSVC clang TODO: Make single build
 # on Windows to avoid dependence on combinations of platforms and compilers and

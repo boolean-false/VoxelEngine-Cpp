@@ -15,6 +15,7 @@
 #include "voxels/Chunks.hpp"
 #include "voxels/GlobalChunks.hpp"
 #include "world/Level.hpp"
+#include "world/LevelEvents.hpp"
 #include "world/World.hpp"
 #include "world/generator/WorldGenerator.hpp"
 
@@ -24,30 +25,36 @@ const uint MIN_SURROUNDING = 9;
 ChunksController::ChunksController(Level& level)
     : level(level),
       generator(std::make_unique<WorldGenerator>(
-          level.content.generators.require(level.getWorld()->getGenerator()),
+          level.content.generators.require(level.environment.generator),
           level.content,
-          level.getWorld()->getSeed()
+          level.getWorld().getSeed()
       )) {}
 
 ChunksController::~ChunksController() = default;
 
 void ChunksController::update(
-    int64_t maxDuration, int loadDistance, uint padding, Player& player
+    int64_t maxDuration,
+    int loadDistance,
+    uint padding,
+    Player& player,
+    bool isLocalPlayer
 ) const {
     const auto& position = player.getPosition();
-    int centerX = floordiv<CHUNK_W>(position.x);
-    int centerY = floordiv<CHUNK_D>(position.z);
+    int centerX = floordiv<CHUNK_W>(glm::floor(position.x));
+    int centerY = floordiv<CHUNK_D>(glm::floor(position.z));
     
     if (player.isLoadingChunks()) {
         /// FIXME: one generator for multiple players
         generator->update(centerX, centerY, loadDistance);
+    } else {
+        return;
     }
 
     int64_t mcstotal = 0;
 
     for (uint i = 0; i < MAX_WORK_PER_FRAME; i++) {
         timeutil::Timer timer;
-        if (loadVisible(player, padding)) {
+        if (loadVisible(player, padding, isLocalPlayer)) {
             int64_t mcs = timer.stop();
             if (mcstotal + mcs < maxDuration * 1000) {
                 mcstotal += mcs;
@@ -58,8 +65,26 @@ void ChunksController::update(
     }
 }
 
-bool ChunksController::loadVisible(const Player& player, uint padding) const {
+bool ChunksController::isInLoadingZone(
+    const Player& player, uint padding, int x, int z
+) const {
     const auto& chunks = *player.chunks;
+    int sizeX = chunks.getWidth();
+    int sizeY = chunks.getHeight();
+
+    int minDistance = ((sizeX - padding * 2) / 2) * ((sizeY - padding * 2) / 2);
+
+    int lx = (x - chunks.getOffsetX()) - sizeX / 2;
+    int lz = (z - chunks.getOffsetY()) - sizeY / 2;
+    int distance = (lx * lx + lz * lz);
+
+    return distance < minDistance;
+}
+
+bool ChunksController::loadVisible(
+    const Player& player, uint padding, bool isLocalPlayer
+) const {
+    auto& chunks = *player.chunks;
     int sizeX = chunks.getWidth();
     int sizeY = chunks.getHeight();
 
@@ -67,21 +92,40 @@ bool ChunksController::loadVisible(const Player& player, uint padding) const {
     int nearZ = 0;
     bool assigned = false;
     int minDistance = ((sizeX - padding * 2) / 2) * ((sizeY - padding * 2) / 2);
+    int maxDistance = ((sizeX) / 2) * ((sizeY) / 2);
+    for (uint z = 0; z < sizeY; z++) {
+        for (uint x = 0; x < sizeX; x++) {
+            int index = z * sizeX + x;
+            int lx = x - sizeX / 2;
+            int lz = z - sizeY / 2;
+            int distance = (lx * lx + lz * lz);
+            auto& chunk = chunks.getChunks()[index];
+            if (chunk != nullptr) {
+                if (distance >= maxDistance) {
+                    chunks.remove(
+                        x + chunks.getOffsetX(), z + chunks.getOffsetY()
+                    );
+                }
+                continue;
+            }
+        }
+    }
     for (uint z = padding; z < sizeY - padding; z++) {
         for (uint x = padding; x < sizeX - padding; x++) {
             int index = z * sizeX + x;
+            int lx = x - sizeX / 2;
+            int lz = z - sizeY / 2;
+            int distance = (lx * lx + lz * lz);
             auto& chunk = chunks.getChunks()[index];
             if (chunk != nullptr) {
                 if (chunk->flags.loaded && !chunk->flags.lighted) {
-                    if (buildLights(player, chunk)) {
+                    if (isLocalPlayer && buildLights(player, chunk)) {
                         return true;
                     }
                 }
                 continue;
             }
-            int lx = x - sizeX / 2;
-            int lz = z - sizeY / 2;
-            int distance = (lx * lx + lz * lz);
+
             if (distance < minDistance) {
                 minDistance = distance;
                 nearX = x;
@@ -112,7 +156,7 @@ bool ChunksController::buildLights(
         }
     }
     if (surrounding == MIN_SURROUNDING) {
-        if (lighting) {
+        if (lighting && chunk->lightmap) {
             bool lightsCache = chunk->flags.loadedLights;
             if (!lightsCache) {
                 lighting->buildSkyLight(chunk->x, chunk->z);
@@ -132,17 +176,16 @@ void ChunksController::createChunk(const Player& player, int x, int z) const {
         }
         return;
     }
-    auto chunk = level.chunks->create(x, z);
+    auto chunk = level.chunks->create(x, z, lighting != nullptr);
     player.chunks->putChunk(chunk);
     auto& chunkFlags = chunk->flags;
-
     if (!chunkFlags.loaded) {
         generator->generate(chunk->voxels, x, z);
         chunkFlags.unsaved = true;
     }
     chunk->updateHeights();
-
-    if (!chunkFlags.loadedLights) {
+    level.events->trigger(LevelEventType::CHUNK_PRESENT, chunk.get());
+    if (!chunkFlags.loadedLights && chunk->lightmap) {
         Lighting::prebuildSkyLight(*chunk, *level.content.getIndices());
     }
     chunkFlags.loaded = true;

@@ -1,6 +1,6 @@
 # Block properties
 
-## Visual
+## Visual & Audio
 
 ### *texture*
 
@@ -34,6 +34,7 @@ Block model type from list:
 - "none" - invisible block (air)
 - "X" - grass model (two crossed sprites)
 - "aabb" - model based of block hitbox (complex hitbox will be combined into one). Examples: pipes, bulbs, panels.
+- "custom" - used when specifying custom models via *model-name*
 
 ### *model-name*
 
@@ -55,6 +56,11 @@ Enables translucency support in block textures (examples: water, ice).
 Should only be used when needed, as it impacts performance.
 Not required for full transparency (grass, flowers).
 
+### *solid*
+
+Explicitly specifies that the block is solid - completely overlapping the blocks behind it.
+Used by blocks with the `custom` model type, which must support culling of invisible geometry, as with the `block` type. If `false` specified then ignored.
+
 ### *rotation*
 
 Rotation profile (set of available block rotations and behaviour of placing block rotation) from list:
@@ -62,6 +68,79 @@ Rotation profile (set of available block rotations and behaviour of placing bloc
 - "none" - no rotation available (default profile)
 - "pipe" - wood logs, pipes, pillars
 - "pane" - panels, doors, signs
+- "stairs" - "pane" + flipped variants
+- "ladder" - like a "pipe", but on horizontal surfaces it is installed like "pane"
+
+### *particles*
+
+Particles are specified as a JSON object. Property names can be found [in the particles section](particles.md).
+
+When camera is near to the block, the engine will create an emitter that will run
+until the block is destroyed or the camera moves away a certain distance.
+
+### Material - *material*
+
+Defines the name of the block's material in the format `pack:material_name`, which affects the selection of block interaction sounds.
+Material definitions are located in /block_materials.
+
+## Variants
+
+Some properties can vary dynamically, depending on the variant number stored in the user bits of the block.
+
+Variability parameters are specified in the `state-based` block:
+
+```json
+{
+    ...
+    "state-based": {
+        "offset": 0,
+        "bits": 4,
+        "variants": [
+            {...},
+            ...
+        ]
+    }
+}
+```
+
+- `offset` specifies the bit offset from which the variant index starts. (Default is 0)
+- `bits` specifies the number of bits encoding the variant index. (Default is 4).
+Currently, the maximum number of variants is 16, so specifying more than 4 bits does not make practical sense.
+
+Properties available for variance:
+- model
+- model-name
+- texture
+- texture-faces
+- model-primitives (deprecated)
+
+Variants are managed via `block.set_variant(x, y, z, index)`.
+
+### Custom model variants (geometry switching)
+
+You can use different custom models for different variants. Provide a separate `model-name` for each variant that needs different geometry. The renderer caches geometry per (block id, variant).
+
+The base model (specified in root) becomes variant 0. The variants array maps to indices 1+.
+
+Example (default + two custom variants):
+```json
+{
+    "model": "custom",
+    "model-name": "stairs_middle",
+    "state-based": {
+        "bits": 4,
+        "variants": [
+            { "model": "custom", "model-name": "stairs_left" },
+            { "model": "custom", "model-name": "stairs_right" }
+        ]
+    }
+}
+```
+
+In this example:
+- Variant 0 = `stairs_middle` (from root)
+- Variant 1 = `stairs_left` (from variants[0])
+- Variant 2 = `stairs_right` (from variants[1])
 
 ## Lighting
 
@@ -98,6 +177,8 @@ Face culling mode:
 - **optional** - face culling among blocks of the same rendering group can be disabled via the `graphics.dense-render` setting.
 - **disabled** - face culling among blocks of the same rendering group disabled.
 
+In `optional` mode, disabling `graphics.dense-render` will use the `*_opaque` texture variant (if available).
+
 ## Physics
 
 ### *obstacle*
@@ -108,13 +189,24 @@ Block is not a physical obstacle if **false**
 
 An array of 6 numbers describing an offset an size of a block hitbox.
 
+The numbers are specified in the range [0.0, 1.0] - i.e. within the block (in the case of an extended block, the hitbox can be larger than one, but must not go beyond the "size" property).
+
 Array *\[0.25, 0.0, 0.5,  0.75, 0.4, 0.3\]* describes hitbox width:
-- offset 0.25m east
+- offset 0.25m west
 - offset 0.0m up
-- offset 0.5m north
-- 0.75m width (from east to west)
+- offset 0.5m south
+- 0.75m width (from west to east)
 - 0.4m height
-- 0.3m length (from south to north)
+- 0.3m length (from north to south)
+
+For composite hitboxes, the *hitboxes* property is used - an array of hitboxes, for example:
+
+```json
+"hitboxes": [
+  [0, 0, 0, 1, 0.625, 1],
+  [0, 0.6875, 0, 1, 0.3125, 1]
+]
+```
 
 ### *grounded*
 
@@ -144,10 +236,6 @@ Item will be chosen on MMB click on the block.
 
 Example: block `door:door_open` is hidden, so you need to specify `picking-item: "door:door.item"` to bind it to not hidden `door:door` block item.
 
-### *script-name*
-
-Used to specify block script name (to reuse one script to multiple blocks). Name must not contain `packid:scripts/` and extension. Just name.
-
 ### *ui-layout*
 
 Block UI XML layout name. Default: string block id.
@@ -165,6 +253,15 @@ Number of block inventory slots. Default - 0 (no inventory).
 ### *size*
 
 Array of three integers. Default value is `[1, 1, 1]`.
+
+### *grounding-behaviour*
+
+Defines the behavior of the extended grounded block. Available behavior options:
+
+- "partial" - at least one segment must be grounded (default)
+- "complete" - all segments must be grounded
+- "origin" - origin segment must be grounded
+
 
 ## Block fields
 
@@ -244,6 +341,16 @@ Example: `base:dirt.item`.
 
 To generate loot, the function `block_loot(block_id: int)` in the `base:util` module should be used.
 
+## Other properties
+
+### *script-name*
+
+Used to specify block script name (to reuse one script to multiple blocks). Name must not contain `packid:scripts/` and extension. Just name.
+
+### Tick Interval - *tick-interval*
+
+The interval in ticks (1/20th of a second). A value of 20 results in an on_block_tick call interval of one second.
+
 ## Methods
 
 Methods are used to manage the overwriting of properties when extending a block with other packs.
@@ -251,3 +358,29 @@ Methods are used to manage the overwriting of properties when extending a block 
 ### `property_name@append`
 
 Adds elements to the end of the list instead of completely overwriting it.
+
+## Tags
+
+Tags allow you to designate general properties of blocks. Names should be formatted as `prefix:tag_name`.
+The prefix is ​​optional, but helps avoid unwanted logical collisions. Example:
+
+```json
+{
+    "tags": [
+        "core:ore",
+        "base_survival:food",
+    ]
+}
+```
+
+Block tags can also be added from other packs using the `your_pack:tags.toml` file. Example:
+
+```toml
+"prefix:tag_name" = [
+    "random_pack:some_block",
+    "another_pack:item",
+]
+"other_prefix:other_tag_name" = [
+    # ...
+]
+``

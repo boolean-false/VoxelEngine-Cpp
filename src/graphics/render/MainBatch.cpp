@@ -6,26 +6,23 @@
 #include "voxels/Chunks.hpp"
 #include "voxels/Chunk.hpp"
 
-static const VertexAttribute attrs[] = {
-    {3}, {2}, {3}, {1}, {0}
-};
 
 MainBatch::MainBatch(size_t capacity)
-    : buffer(std::make_unique<float[]>(capacity * VERTEX_SIZE)),
-      capacity(capacity),
-      index(0),
-      mesh(std::make_unique<Mesh>(buffer.get(), 0, attrs)) {
+        : buffer(std::make_unique<MainBatchVertex[]>(capacity)),
+          capacity(capacity),
+          index(0),
+          mesh(std::make_unique<Mesh<MainBatchVertex>>(buffer.get(), 0)) {
 
     const ubyte pixels[] = {
-        255, 255, 255, 255,
+            255, 255, 255, 255,
     };
-    ImageData image(ImageFormat::rgba8888, 1, 1, pixels);
+    ImageData image(ImageFormat::RGBA8888, 1, 1, pixels);
     blank = Texture::from(&image);
 }
 
 MainBatch::~MainBatch() = default;
 
-void MainBatch::setTexture(const Texture* texture) {
+void MainBatch::setTexture(const Texture *texture) {
     if (texture == nullptr) {
         texture = blank.get();
     }
@@ -33,10 +30,10 @@ void MainBatch::setTexture(const Texture* texture) {
         flush();
     }
     this->texture = texture;
-    region = UVRegion {0.0f, 0.0f, 1.0f, 1.0f};
+    region = UVRegion{0.0f, 0.0f, 1.0f, 1.0f};
 }
 
-void MainBatch::setTexture(const Texture* texture, const UVRegion& region) {
+void MainBatch::setTexture(const Texture *texture, const UVRegion &region) {
     setTexture(texture);
     this->region = region;
 }
@@ -49,7 +46,7 @@ void MainBatch::flush() {
         texture = blank.get();
     }
     texture->bind();
-    mesh->reload(buffer.get(), index / VERTEX_SIZE);
+    mesh->reload(buffer.get(), index, true);
     mesh->draw();
     index = 0;
 }
@@ -60,76 +57,84 @@ void MainBatch::begin() {
 }
 
 void MainBatch::prepare(int vertices) {
-    if (index + VERTEX_SIZE * vertices > capacity * VERTEX_SIZE) {
+    if (index * vertices > capacity) {
         flush();
     }
 }
 
 glm::vec4 MainBatch::sampleLight(
-    const glm::vec3& pos, const Chunks& chunks, bool backlight
+        const glm::vec3 &pos, const Chunks &chunks, bool backlight
 ) {
     light_t light = chunks.getLight(
-        std::floor(pos.x), 
-        std::floor(std::min(CHUNK_H-1.0f, pos.y)), 
-        std::floor(pos.z));
+            std::floor(pos.x),
+            std::floor(std::min(CHUNK_H - 1.0f, pos.y)),
+            std::floor(pos.z));
     light_t minIntensity = backlight ? 1 : 0;
-    return glm::vec4(
-        glm::max(Lightmap::extract(light, 0), minIntensity) / 15.0f,
-        glm::max(Lightmap::extract(light, 1), minIntensity) / 15.0f,
-        glm::max(Lightmap::extract(light, 2), minIntensity) / 15.0f,
-        glm::max(Lightmap::extract(light, 3), minIntensity) / 15.0f
-    );
+    return {
+            (float) glm::max(Lightmap::extract(light, 0), minIntensity) / 15.0f,
+            (float) glm::max(Lightmap::extract(light, 1), minIntensity) / 15.0f,
+            (float) glm::max(Lightmap::extract(light, 2), minIntensity) / 15.0f,
+            (float) glm::max(Lightmap::extract(light, 3), minIntensity) / 15.0f
+    };
 }
 
 inline glm::vec4 do_tint(float value) {
-    return glm::vec4(value, value, value, 1.0f);
+    return {value, value, value, 1.0f};
 }
 
 void MainBatch::cube(
     const glm::vec3& coord,
     const glm::vec3& size,
     const UVRegion(&texfaces)[6],
-    const glm::vec4& tint,
-    bool shading
+    const glm::vec4& lights,
+    const glm::vec3 tints[],
+    float emission,
+    uint8_t cullingBits
 ) {
     const glm::vec3 X(1.0f, 0.0f, 0.0f);
     const glm::vec3 Y(0.0f, 1.0f, 0.0f);
     const glm::vec3 Z(0.0f, 0.0f, 1.0f);
 
+    if (cullingBits & 0x20)
     quad(
         coord + Z * size.z * 0.5f,
-        X, Y, glm::vec2(size.x, size.y),
-        (shading ? do_tint(0.8) * tint : tint),
-        glm::vec3(1.0f), texfaces[5]
+        X, Y, Z, glm::vec2(size.x, size.y),
+        do_tint((1.0f - emission) * 0.8 + emission) * lights,
+        tints[5], texfaces[5]
     );
+    if (cullingBits & 0x10)
     quad(
         coord - Z * size.z * 0.5f,
-        -X, Y, glm::vec2(size.x, size.y),
-        (shading ? do_tint(0.9f) * tint : tint),
-        glm::vec3(1.0f), texfaces[4]
+        -X, Y, -Z, glm::vec2(size.x, size.y),
+        do_tint((1.0f - emission) * 0.9 + emission) * lights,
+        tints[4], texfaces[4]
     );
+    if (cullingBits & 0x8)
     quad(
         coord + Y * size.y * 0.5f,
-        -X, Z, glm::vec2(size.x, size.z),
-        (shading ? do_tint(1.0f) * tint : tint),
-        glm::vec3(1.0f), texfaces[3]
+        -X, Z, Y, glm::vec2(size.x, size.z),
+        do_tint((1.0f - emission) * 1.0 + emission) * lights,
+        tints[3], texfaces[3]
     );
+    if (cullingBits & 0x4)
     quad(
         coord - Y * size.y * 0.5f,
-        X, Z, glm::vec2(size.x, size.z),
-        (shading ? do_tint(0.7f) * tint : tint),
-        glm::vec3(1.0f), texfaces[2]
+        X, Z, -Y, glm::vec2(size.x, size.z),
+        do_tint((1.0f - emission) * 0.7 + emission) * lights,
+        tints[2], texfaces[2]
     );
+    if (cullingBits & 0x2)
     quad(
         coord + X * size.x * 0.5f,
-        -Z, Y, glm::vec2(size.z, size.y),
-        (shading ? do_tint(0.8f) * tint : tint),
-        glm::vec3(1.0f), texfaces[1]
+        -Z, Y, X, glm::vec2(size.z, size.y),
+        do_tint((1.0f - emission) * 0.8 + emission) * lights,
+        tints[1], texfaces[1]
     );
+    if (cullingBits & 0x1)
     quad(
         coord - X * size.x * 0.5f,
-        Z, Y, glm::vec2(size.z, size.y),
-        (shading ? do_tint(0.9f) * tint : tint),
-        glm::vec3(1.0f), texfaces[1]
+        Z, Y, -X, glm::vec2(size.z, size.y),
+        do_tint((1.0f - emission) * 0.9 + emission) * lights,
+        tints[0], texfaces[0]
     );
 }

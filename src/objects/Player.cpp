@@ -9,31 +9,27 @@
 #include "content/ContentReport.hpp"
 #include "items/Inventory.hpp"
 #include "Entities.hpp"
+#include "Entity.hpp"
 #include "rigging.hpp"
 #include "physics/Hitbox.hpp"
 #include "physics/PhysicsSolver.hpp"
 #include "voxels/Chunks.hpp"
 #include "window/Camera.hpp"
-#include "window/Events.hpp"
 #include "world/Level.hpp"
+#include "world/World.hpp"
+#include "world/generator/GeneratorDef.hpp"
 #include "data/dv_util.hpp"
 #include "debug/Logger.hpp"
+#include "util/stringutil.hpp"
 
 static debug::Logger logger("player");
 
-constexpr float CROUCH_SPEED_MUL = 0.35f;
-constexpr float RUN_SPEED_MUL = 1.5f;
-constexpr float PLAYER_GROUND_DAMPING = 10.0f;
-constexpr float PLAYER_AIR_DAMPING = 8.0f;
-constexpr float FLIGHT_SPEED_MUL = 4.0f;
-constexpr float CHEAT_SPEED_MUL = 5.0f;
-constexpr float JUMP_FORCE = 8.0f;
 constexpr int SPAWN_ATTEMPTS_PER_UPDATE = 64;
 
 Player::Player(
     Level& level,
     int64_t id,
-    const std::string& name,
+    const std::wstring& name,
     glm::vec3 position,
     float speed,
     std::shared_ptr<Inventory> inv,
@@ -57,6 +53,7 @@ Player::Player(
     fpCamera->setFov(glm::radians(90.0f));
     spCamera->setFov(glm::radians(90.0f));
     tpCamera->setFov(glm::radians(90.0f));
+    random.setSeed((id << 8) ^ 34076213);
 }
 
 Player::~Player() = default;
@@ -84,73 +81,17 @@ void Player::updateEntity() {
     }
 }
 
-Hitbox* Player::getHitbox() {
+Hitbox* Player::getHitbox() const {
     if (auto entity = level.entities->get(eid)) {
         return &entity->getRigidbody().hitbox;
     }
     return nullptr;
 }
 
-void Player::updateInput(PlayerInput& input, float delta) {
-    auto hitbox = getHitbox();
-    if (hitbox == nullptr) {
-        return;
-    }
-    bool crouch = input.shift && hitbox->grounded && !input.sprint;
-    float speed = this->speed;
-    if (flight) {
-        speed *= FLIGHT_SPEED_MUL;
-    }
-    if (input.cheat) {
-        speed *= CHEAT_SPEED_MUL;
-    }
-
-    hitbox->crouching = crouch;
-    if (crouch) {
-        speed *= CROUCH_SPEED_MUL;
-    } else if (input.sprint) {
-        speed *= RUN_SPEED_MUL;
-    }
-
-    glm::vec3 dir(0, 0, 0);
-    if (input.moveForward) {
-        dir += fpCamera->dir;
-    }
-    if (input.moveBack) {
-        dir -= fpCamera->dir;
-    }
-    if (input.moveRight) {
-        dir += fpCamera->right;
-    }
-    if (input.moveLeft) {
-        dir -= fpCamera->right;
-    }
-    if (glm::length(dir) > 0.0f) {
-        dir = glm::normalize(dir);
-        hitbox->velocity += dir * speed * delta * 9.0f;
-    }
-
-    hitbox->linearDamping = PLAYER_GROUND_DAMPING;
-    hitbox->verticalDamping = flight;
-    hitbox->gravityScale = flight ? 0.0f : 1.0f;
-    if (flight) {
-        hitbox->linearDamping = PLAYER_AIR_DAMPING;
-        if (input.jump) {
-            hitbox->velocity.y += speed * delta * 9;
-        }
-        if (input.shift) {
-            hitbox->velocity.y -= speed * delta * 9;
-        }
-    }
-    if (!hitbox->grounded) {
-        hitbox->linearDamping = PLAYER_AIR_DAMPING;
-    }
-
-    if (input.jump && hitbox->grounded) {
-        hitbox->velocity.y = JUMP_FORCE;
-    }
-
-    hitbox->type = noclip ? BodyType::KINEMATIC : BodyType::DYNAMIC;
+bool Player::isCurrentCameraBuiltin() const {
+    return currentCamera.get() == fpCamera.get() ||
+           currentCamera.get() == spCamera.get() ||
+           currentCamera.get() == tpCamera.get();
 }
 
 void Player::updateSelectedEntity() {
@@ -168,33 +109,34 @@ void Player::postUpdate() {
     if (flight && hitbox.grounded && !noclip) {
         flight = false;
     }
-    if (spawnpoint.y <= 0.1) {
-        for (int i = 0; i < SPAWN_ATTEMPTS_PER_UPDATE; i++) {
-            attemptToFindSpawnpoint();
-        }
+    for (int i = 0; i < SPAWN_ATTEMPTS_PER_UPDATE && std::isnan(spawnpoint.x); i++) {
+        attemptToChooseSpawnpoint();
     }
-
-    // TODO: ERASE & FORGET
-    auto& skeleton = entity->getSkeleton();
-    skeleton.visible = currentCamera != fpCamera;
 }
 
 void Player::teleport(glm::vec3 position) {
     this->position = position;
 
     if (auto entity = level.entities->get(eid)) {
-        entity->getRigidbody().hitbox.position = position;
+        entity->getRigidbody().hitbox.setPos(position);
         entity->getTransform().setPos(position);
         entity->setInterpolatedPosition(position);
     }
 }
 
-void Player::attemptToFindSpawnpoint() {
-    glm::vec3 newpos(
-        position.x + (rand() % 200 - 100),
-        rand() % 80 + 100,
-        position.z + (rand() % 200 - 100)
-    );
+void Player::attemptToChooseSpawnpoint() {
+    // looks bad to be here tbh
+    const auto& generatorDef =
+        level.content.generators.require(level.environment.generator);
+
+    int minHeight = generatorDef.playerMinSpawnHeight;
+    int maxHeight = generatorDef.playerMaxSpawnHeight;
+    glm::vec3 newpos {0.0f, random.randFloat() * (maxHeight - minHeight + 1) + minHeight, 0.0f};
+    double angle = random.randDouble() * glm::two_pi<double>();
+    double radius = glm::sqrt(random.randDouble());
+    newpos.x += glm::cos(angle) * generatorDef.playerSpawnRadius * radius;
+    newpos.z += glm::sin(angle) * generatorDef.playerSpawnRadius * radius;
+
     while (newpos.y > 0 &&
            !chunks->isObstacleBlock(newpos.x, newpos.y - 2, newpos.z)) {
         newpos.y--;
@@ -269,6 +211,14 @@ void Player::setLoadingChunks(bool flag) {
     loadingChunks = flag;
 }
 
+float Player::getMaxInteractionDistance() const {
+    return interactionDistance;
+}
+
+void Player::setMaxInteractionDistance(float distance) {
+    interactionDistance = std::max(1.0f, std::min(200.0f, distance));
+}
+
 entityid_t Player::getEntity() const {
     return eid;
 }
@@ -281,11 +231,11 @@ entityid_t Player::getSelectedEntity() const {
     return selectedEid;
 }
 
-void Player::setName(const std::string& name) {
+void Player::setName(const std::wstring& name) {
     this->name = name;
 }
 
-const std::string& Player::getName() const {
+const std::wstring& Player::getName() const {
     return name;
 }
 
@@ -317,14 +267,16 @@ dv::value Player::serialize() const {
     auto root = dv::object();
 
     root["id"] = id;
-    root["name"] = name;
+    root["name"] = util::wstr2str_utf8(name);
 
     root["position"] = dv::to_value(position);
     root["rotation"] = dv::to_value(rotation);
     root["spawnpoint"] = dv::to_value(spawnpoint);
 
+    root["interaction-distance"] = interactionDistance;
     root["flight"] = flight;
     root["noclip"] = noclip;
+    root["suspended"] = suspended;
     root["infinite-items"] = infiniteItems;
     root["instant-destruction"] = instantDestruction;
     root["loading-chunks"] = loadingChunks;
@@ -342,7 +294,10 @@ dv::value Player::serialize() const {
 
 void Player::deserialize(const dv::value& src) {
     src.at("id").get(id);
-    src.at("name").get(name);
+
+    std::string utf8name;
+    src.at("name").get(utf8name);
+    name = util::str2wstr_utf8(utf8name);
 
     const auto& posarr = src["position"];
 
@@ -355,9 +310,12 @@ void Player::deserialize(const dv::value& src) {
     const auto& sparr = src["spawnpoint"];
     setSpawnPoint(glm::vec3(
         sparr[0].asNumber(), sparr[1].asNumber(), sparr[2].asNumber()));
+    
+    src.at("interaction-distance").get(interactionDistance);
 
     flight = src["flight"].asBoolean();
     noclip = src["noclip"].asBoolean();
+    src.at("suspended").get(suspended);
     src.at("infinite-items").get(infiniteItems);
     src.at("instant-destruction").get(instantDestruction);
     src.at("loading-chunks").get(loadingChunks);

@@ -5,9 +5,22 @@
         "main",
         "lines",
         "entity",
-        "screen",
+        "translucent",
         "background",
-        "skybox_gen"
+        "skybox_gen",
+        "shadows",
+        "clouds"
+    ],
+    "post-effects": [
+        "default",
+        {
+            "name": "ssao",
+            "advanced": true
+        },
+        {
+            "name": "deferred_lighting",
+            "advanced": true
+        }
     ],
     "textures": [
         "gui/menubg",
@@ -35,7 +48,12 @@
         "gui/info",
         "gui/world",
         "gui/hud",
-        "gui/entity"
+        "gui/entity",
+        "gui/half_block",
+        {
+            "name": "",
+            "path": "textures/misc/blank"
+        }
     ],
     "fonts": [
         {

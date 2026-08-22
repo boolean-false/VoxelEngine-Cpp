@@ -22,19 +22,39 @@ namespace {
     }
 
     inline double power(double base, int64_t power) {
+        if (power == 0) {
+            return 1.0;
+        }
+
+        uint64_t exp;
+        if (power < 0) {
+            base = 1.0 / base;
+            exp = static_cast<uint64_t>(-(power + 1)) + 1;
+        } else {
+            exp = static_cast<uint64_t>(power);
+        }
+
         double result = 1.0;
-        for (int64_t i = 0; i < power; i++) {
-            result *= base;
+
+        while (exp > 0) {
+            if (exp & 1)
+                result *= base;
+
+            base *= base;
+            exp >>= 1;
         }
         return result;
     }
 }
 
 template<typename CharT>
-void BasicParser<CharT>::skipWhitespace() {
+void BasicParser<CharT>::skipWhitespaceBasic(bool newline) {
     while (hasNext()) {
-        char next = source[pos];
+        CharT next = source[pos];
         if (next == '\n') {
+            if (!newline) {
+                break;
+            }
             line++;
             linestart = ++pos;
             continue;
@@ -43,6 +63,67 @@ void BasicParser<CharT>::skipWhitespace() {
             pos++;
         } else {
             break;
+        }
+    }
+}
+
+template<typename CharT>
+void BasicParser<CharT>::skipWhitespace(bool newline) {
+    if (hashComment) {
+        skipWhitespaceHashComment(newline);
+        return;
+    } else if (clikeComment) {
+        skipWhitespaceCLikeComment(newline);
+        return;
+    }
+    skipWhitespaceBasic(newline);
+}
+
+template<typename CharT>
+void BasicParser<CharT>::skipWhitespaceHashComment(bool newline) {
+    skipWhitespaceBasic(newline);
+    if (hasNext() && source[pos] == '#') {
+        if (!newline) {
+            readUntilEOL();
+            return;
+        }
+        skipLine();
+        if (hasNext() && (is_whitespace(source[pos]) || source[pos] == '#')) {
+            skipWhitespaceHashComment(newline);
+        }
+    }
+}
+
+template<typename CharT>
+void BasicParser<CharT>::skipWhitespaceCLikeComment(bool newline) {
+    skipWhitespaceBasic(newline);
+    if (hasNext() && source[pos] == '/' && pos + 1 < source.length()) {
+        pos++;
+        switch (source[pos]) {
+            case '*':
+                pos++;
+                while (hasNext()) {
+                    if (source[pos] == '/' && source[pos-1] == '*') {
+                        pos++;
+                        skipWhitespace();
+                        return;
+                    }
+                    pos++;
+                }
+                break;
+            case '/':
+                if (!newline) {
+                    readUntilEOL();
+                    return;
+                }
+                skipLine();
+                if (hasNext() && (is_whitespace(source[pos]) || source[pos] == '/')) {
+                    skipWhitespaceCLikeComment(newline);
+                }
+                break;
+            default:
+                pos--;
+                break;
         }
     }
 }
@@ -74,6 +155,16 @@ void BasicParser<CharT>::skipLine() {
 }
 
 template<typename CharT>
+void BasicParser<CharT>::skipEmptyLines() {
+    if (!hasNext()) {
+        return;
+    }
+    size_t initpos = pos;
+    skipWhitespace();
+    pos = std::max<size_t>(initpos, linestart);
+}
+
+template<typename CharT>
 bool BasicParser<CharT>::skipTo(const std::basic_string<CharT>& substring) {
     size_t idx = source.find(substring, pos);
     if (idx == std::string::npos) {
@@ -97,6 +188,9 @@ size_t BasicParser<CharT>::remain() const {
 
 template<typename CharT>
 bool BasicParser<CharT>::isNext(const std::basic_string<CharT>& substring) {
+    if (substring.empty()) {
+        return false;
+    }
     if (source.length() - pos < substring.length()) {
         return false;
     }
@@ -240,8 +334,11 @@ std::basic_string_view<CharT> BasicParser<CharT>::readUntilWhitespace() {
 template <typename CharT>
 std::basic_string_view<CharT> BasicParser<CharT>::readUntilEOL() {
     int start = pos;
-    while (hasNext() && source[pos] != '\r' && source[pos] != '\n') {
+    while (hasNext() && source[pos] != '\n') {
         pos++;
+    }
+    if (pos > start && source[pos - 1] == '\r') {
+        return source.substr(start, pos - start - 1);
     }
     return source.substr(start, pos - start);
 }
@@ -273,7 +370,10 @@ std::basic_string<CharT> BasicParser<CharT>::parseXmlName() {
 }
 
 template <typename CharT>
-int64_t BasicParser<CharT>::parseSimpleInt(int base) {
+int64_t BasicParser<CharT>::parseSimpleInt(int base, size_t maxLength) {
+    if (maxLength == 0) return 0;
+
+    size_t start = pos;
     CharT c = peek();
     int index = hexchar2int(c);
     if (index == -1 || index >= base) {
@@ -281,7 +381,7 @@ int64_t BasicParser<CharT>::parseSimpleInt(int base) {
     }
     int64_t value = index;
     pos++;
-    while (hasNext()) {
+    while (hasNext() && pos - start < maxLength) {
         c = source[pos];
         while (c == '_') {
             c = source[++pos];
@@ -359,19 +459,21 @@ dv::value BasicParser<CharT>::parseNumber(int sign) {
                 static_cast<int64_t>(std::log10(afterdot) + 1)
             )
         );
-        c = source[pos];
 
         double dvalue = (value + (afterdot / (double)expo));
-        if (c == 'e' || c == 'E') {
-            pos++;
-            int s = 1;
-            if (peek() == '-') {
-                s = -1;
+        if (hasNext()){
+            c = source[pos];
+            if (c == 'e' || c == 'E') {
                 pos++;
-            } else if (peek() == '+') {
-                pos++;
+                int s = 1;
+                if (peek() == '-') {
+                    s = -1;
+                    pos++;
+                } else if (peek() == '+') {
+                    pos++;
+                }
+                return sign * dvalue * power(10.0, s * parseSimpleInt(10));
             }
-            return sign * dvalue * power(10.0, s * parseSimpleInt(10));
         }
         return sign * dvalue;
     }
@@ -398,7 +500,7 @@ std::basic_string<CharT> BasicParser<CharT>::parseString(
                 continue;
             }
             if (c == 'u' || c == 'x') {
-                int codepoint = parseSimpleInt(16);
+                int codepoint = parseSimpleInt(16, c == 'u' ? 4 : 2);
                 ubyte bytes[4];
                 int size = util::encode_utf8(codepoint, bytes);
                 CharT chars[4];

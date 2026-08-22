@@ -9,6 +9,7 @@ Debug/voxel_engine
 /export
 /config
 /out
+/projects
 
 /misc
 /world
@@ -48,3 +49,6 @@ appimage-build/
 # libs
 /libs/
 /vcpkg_installed/
+
+# vcstudio
+.vcstudio

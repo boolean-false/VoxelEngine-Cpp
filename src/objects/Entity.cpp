@@ -1,0 +1,126 @@
+#include "Entity.hpp"
+
+#include "Transform.hpp"
+#include "Rigidbody.hpp"
+#include "ScriptComponents.hpp"
+#include "Entities.hpp"
+#include "EntityDef.hpp"
+#include "rigging.hpp"
+#include "logic/scripting/scripting.hpp"
+
+#include <entt/entt.hpp>
+
+static inline std::string SAVED_DATA_VARNAME = "SAVED_DATA";
+
+void Entity::setInterpolatedPosition(const glm::vec3& position) {
+    if (auto skeleton = getSkeleton()) {
+        skeleton->interpolation.refresh(position);
+    }
+}
+
+glm::vec3 Entity::getInterpolatedPosition() const {
+    if (auto skeleton = getSkeleton()) {
+        if (skeleton->interpolation.isEnabled()) {
+            return skeleton->interpolation.getCurrent();
+        }
+    }
+    return getTransform().pos;
+}
+
+void Entity::destroy() {
+    if (isValid()) {
+        entities.despawn(id);
+    }
+}
+
+rigging::Skeleton* Entity::getSkeleton() const {
+    return registry.try_get<rigging::Skeleton>(entity);
+}
+
+void Entity::setRig(std::shared_ptr<const rigging::SkeletonConfig> rigConfig) {
+    auto& skeleton = registry.get<rigging::Skeleton>(entity);
+    skeleton.setConfig(std::move(rigConfig));
+}
+
+dv::value Entity::serialize() const {
+    const auto& eid = getID();
+    const auto& def = eid.def;
+    const auto& transform = getTransform();
+    const auto& rigidbody = getRigidbody();
+    const auto& scripts = getScripting();
+    auto skeleton = getSkeleton();
+
+    auto root = dv::object();
+    root["def"] = def.name;
+    root["uid"] = eid.uid;
+
+    root[COMP_TRANSFORM] = transform.serialize();
+    root[COMP_RIGIDBODY] =
+        rigidbody.serialize(def.save.body.velocity, def.save.body.settings);
+
+    if (skeleton != nullptr && skeleton->config != nullptr) {
+        if (skeleton->config->getName() != def.skeletonName) {
+            root["skeleton-name"] = skeleton->config->getName();
+        }
+        if (def.save.skeleton.pose || def.save.skeleton.textures) {
+            root[COMP_SKELETON] = skeleton->serialize(
+                def.save.skeleton.pose, def.save.skeleton.textures
+            );
+        }
+    }
+    if (!scripts.components.empty()) {
+        auto& compsMap = root.object("comps");
+        for (auto& comp : scripts.components) {
+            if (comp->env == nullptr) {
+                continue;
+            }
+            auto data =
+                scripting::get_component_value(comp->env, SAVED_DATA_VARNAME);
+            compsMap[comp->name] = data;
+        }
+    }
+    return root;
+}
+
+EntityId& Entity::getID() const {
+    return registry.get<EntityId>(entity);
+}
+
+bool Entity::isValid() const {
+    return registry.valid(entity);
+}
+
+Transform& Entity::getTransform() const {
+    return registry.get<Transform>(entity);
+}
+
+
+ScriptComponents& Entity::getScripting() const {
+    return registry.get<ScriptComponents>(entity);
+}
+
+const EntityDef& Entity::getDef() const {
+    return registry.get<EntityId>(entity).def;
+}
+
+Rigidbody& Entity::getRigidbody() const {
+    return registry.get<Rigidbody>(entity);
+}
+
+entityid_t Entity::getUID() const {
+    return registry.get<EntityId>(entity).uid;
+}
+
+int64_t Entity::getPlayer() const {
+    return registry.get<EntityId>(entity).player;
+}
+
+void Entity::setPlayer(int64_t id) {
+    auto& eid = registry.get<EntityId>(entity);
+    if (eid.player == id) {
+        return;
+    }
+    eid.player = id;
+    scripting::on_entity_player_set(*this, id);
+}
+

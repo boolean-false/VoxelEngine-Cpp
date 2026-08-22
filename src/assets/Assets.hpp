@@ -12,11 +12,22 @@
 #include <vector>
 
 #include "util/stringutil.hpp"
+#include "util/ObjectsKeeper.hpp"
 #include "graphics/core/TextureAnimation.hpp"
 
 class Assets;
 
-enum class AssetType { TEXTURE, SHADER, FONT, ATLAS, LAYOUT, SOUND, MODEL };
+enum class AssetType {
+    TEXTURE,
+    SHADER,
+    FONT,
+    ATLAS,
+    LAYOUT,
+    SOUND,
+    MODEL,
+    POST_EFFECT,
+    SKELETON
+};
 
 namespace assetload {
     /// @brief final work to do in the main thread
@@ -54,13 +65,14 @@ namespace assetload {
 }
 
 class Assets {
+    util::ObjectsKeeper* vault;
     std::vector<TextureAnimation> animations;
 
     using assets_map = std::unordered_map<std::string, std::shared_ptr<void>>;
     std::unordered_map<std::type_index, assets_map> assets;
     std::vector<assetload::setupfunc> setupFuncs;
 public:
-    Assets() = default;
+    Assets(util::ObjectsKeeper* vault);
     Assets(const Assets&) = delete;
     ~Assets();
 
@@ -69,12 +81,20 @@ public:
 
     template <class T>
     void store(std::unique_ptr<T> asset, const std::string& name) {
-        assets[typeid(T)][name].reset(asset.release());
+        auto& dst = assets[typeid(T)][name];
+        if (vault != nullptr && dst != nullptr) {
+            vault->keepAlive(std::move(dst));
+        }
+        dst.reset(asset.release());
     }
 
     template <class T>
     void store(std::shared_ptr<T> asset, const std::string& name) {
-        assets[typeid(T)][name] = std::move(asset);
+        auto& dst = assets[typeid(T)][name];
+        if (vault != nullptr && dst != nullptr) {
+            vault->keepAlive(std::move(dst));
+        }
+        dst = std::move(asset);
     }
 
     template <class T>
@@ -89,6 +109,20 @@ public:
             return nullptr;
         }
         return static_cast<T*>(found->second.get());
+    }
+
+    template <class T>
+    std::shared_ptr<T> getShared(const std::string& name) const {
+        const auto& mapIter = assets.find(typeid(T));
+        if (mapIter == assets.end()) {
+            return nullptr;
+        }
+        const auto& map = mapIter->second;
+        const auto& found = map.find(name);
+        if (found == map.end()) {
+            return nullptr;
+        }
+        return std::static_pointer_cast<T>(found->second);
     }
 
     template <class T>

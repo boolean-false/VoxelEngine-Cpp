@@ -2,7 +2,6 @@
 
 #include <glm/glm.hpp>
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "io/fwd.hpp"
@@ -15,6 +14,7 @@ class Engine;
 class Content;
 struct ContentPack;
 class ContentIndices;
+class ContentControl;
 class Level;
 class Block;
 class Chunk;
@@ -23,10 +23,12 @@ struct ItemDef;
 class Inventory;
 class UiDocument;
 struct BlockFuncsSet;
+struct BlockFuncNamesCache;
 struct ItemFuncsSet;
+struct ItemFuncNamesCache;
 struct WorldFuncsSet;
 struct UserComponent;
-struct uidocscript;
+struct UiDocScript;
 class BlocksController;
 class LevelController;
 class Entity;
@@ -39,6 +41,7 @@ namespace scripting {
     extern Engine* engine;
     extern const Content* content;
     extern const ContentIndices* indices;
+    extern ContentControl* content_control;
     extern Level* level;
     extern BlocksController* blocks;
     extern LevelController* controller;
@@ -48,6 +51,7 @@ namespace scripting {
     void initialize(Engine* engine);
 
     void on_content_load(Content* content);
+    void on_content_reset();
 
     bool register_event(
         int env, const std::string& name, const std::string& id
@@ -56,21 +60,32 @@ namespace scripting {
 
     scriptenv get_root_environment();
     scriptenv create_pack_environment(const ContentPack& pack);
+    scriptenv create_environment(const scriptenv& parent);
     scriptenv create_doc_environment(
         const scriptenv& parent, const std::string& name
     );
 
     void process_post_runnables();
 
-    std::unique_ptr<Process> start_coroutine(
+    class IClientProjectScript {
+    public:
+        virtual ~IClientProjectScript() {}
+
+        virtual void onScreenChange(const std::string& name, bool show) = 0;
+    };
+
+    std::unique_ptr<IClientProjectScript> load_client_project_script(
         const io::path& script
     );
 
+    std::unique_ptr<Process> start_app_script(const io::path& script);
+
     void on_world_load(LevelController* controller);
-    void on_world_tick();
+    void on_world_tick(int tps);
     void on_world_save();
+    void process_before_quit();
     void on_world_quit();
-    void cleanup();
+    void cleanup(const std::vector<std::string>& nonReset);
     void on_blocks_tick(const Block& block, int tps);
     void update_block(const Block& block, const glm::ivec3& pos);
     void random_update_block(const Block& block, const glm::ivec3& pos);
@@ -93,6 +108,7 @@ namespace scripting {
 
     void on_inventory_open(const Player* player, const Inventory& inventory);
     void on_inventory_closed(const Player* player, const Inventory& inventory);
+    void on_inventory_interact(int invid, int slot, int action, int mode);
 
     void on_player_tick(Player* player, int tps);
 
@@ -126,7 +142,9 @@ namespace scripting {
     void on_entity_grounded(const Entity& entity, float force);
     void on_entity_fall(const Entity& entity);
     void on_entity_save(const Entity& entity);
+    void on_entity_player_set(const Entity& entity, int64_t pid);
     void on_entities_update(int tps, int parts, int part);
+    void on_entities_physics_update(float delta);
     void on_entities_render(float delta);
     void on_sensor_enter(const Entity& entity, size_t index, entityid_t oid);
     void on_sensor_exit(const Entity& entity, size_t index, entityid_t oid);
@@ -135,13 +153,22 @@ namespace scripting {
     void on_attacked(const Entity& entity, Player* player, entityid_t attacker);
     void on_entity_used(const Entity& entity, Player* player);
 
-    /// @brief Called on UI view show
-    void on_ui_open(UiDocument* layout, std::vector<dv::value> args);
+    /// @brief Called on UI document show
+    void on_ui_open(const UiDocument& layout, std::vector<dv::value> args);
 
-    void on_ui_progress(UiDocument* layout, int workDone, int totalWork);
+    void on_ui_progress(const UiDocument& layout, int workDone, int totalWork);
 
-    /// @brief Called on UI view close
-    void on_ui_close(UiDocument* layout, Inventory* inventory);
+    /// @brief Called on UI document close
+    void on_ui_close(const UiDocument& layout, Inventory* inventory);
+
+    /// @brief Called on UI document destroy
+    void on_ui_destroy(const UiDocument& layout);
+
+    /// @brief Called on Content loading
+    void on_scripts_loading();
+
+    /// @brief Called on Content loading finish
+    void on_content_loaded();
 
     /// @brief Load script associated with a Block
     /// @param env environment
@@ -154,7 +181,8 @@ namespace scripting {
         const std::string& prefix,
         const io::path& file,
         const std::string& fileName,
-        BlockFuncsSet& funcsset
+        BlockFuncsSet& funcsset,
+        BlockFuncNamesCache& namesCache
     );
 
     /// @brief Load script associated with an Item
@@ -168,14 +196,17 @@ namespace scripting {
         const std::string& prefix,
         const io::path& file,
         const std::string& fileName,
-        ItemFuncsSet& funcsset
+        ItemFuncsSet& funcsset,
+        ItemFuncNamesCache& namesCache
     );
 
     /// @brief Load component script
+    /// @param env environment
     /// @param name component full name (packid:name)
     /// @param file component script file path
     /// @param fileName script file path using the engine format
     void load_entity_component(
+        const scriptenv& env,
         const std::string& name,
         const io::path& file,
         const std::string& fileName
@@ -200,6 +231,13 @@ namespace scripting {
         WorldFuncsSet& funcsset
     );
 
+    void load_content_script(
+        const scriptenv& env,
+        const std::string& packid,
+        const io::path& file,
+        const std::string& fileName
+    );
+
     /// @brief Load script associated with an UiDocument
     /// @param env environment
     /// @param prefix pack id
@@ -211,7 +249,7 @@ namespace scripting {
         const std::string& prefix,
         const io::path& file,
         const std::string& fileName,
-        uidocscript& script
+        UiDocScript& script
     );
 
     /// @brief Finalize lua state. Using scripting after will lead to Lua panic

@@ -11,6 +11,8 @@
 #include "voxels/GlobalChunks.hpp"
 #include "voxels/VoxelsVolume.hpp"
 #include "voxels/blocks_agent.hpp"
+#include "logic/LevelController.hpp"
+#include "lighting/Lighting.hpp"
 #include "world/Level.hpp"
 #include "core_defs.hpp"
 
@@ -171,8 +173,12 @@ void VoxelFragment::prepare(const Content& content) {
 }
 
 void VoxelFragment::place(
-    GlobalChunks& chunks, const glm::ivec3& offset, ubyte rotation
+    LevelController& controller, const glm::ivec3& offset
 ) {
+    auto& level = *controller.getLevel();
+    auto& chunks = *level.chunks;
+    auto lighting = controller.getChunksController()->lighting.get();
+    const auto& defs = level.content.getIndices()->blocks;
     auto& structVoxels = getRuntimeVoxels();
     for (int y = 0; y < size.y; y++) {
         int sy = y + offset.y;
@@ -189,6 +195,10 @@ void VoxelFragment::place(
                     blocks_agent::set(
                         chunks, sx, sy, sz, structVoxel.id, structVoxel.state
                     );
+                    if (lighting) {
+                        const auto& def = defs.require(structVoxel.id);
+                        lighting->onBlockSet(sx, sy, sz, def.rt.id);
+                    }
                 }
             }
         }
@@ -209,10 +219,14 @@ std::unique_ptr<VoxelFragment> VoxelFragment::rotated(const Content& content) co
                                     | ((voxel.state.segment & 0b100) >> 2);
                 auto& def = content.blocks.require(blockNames[voxel.id]);
                 if (def.rotations.name == BlockRotProfile::PANE_NAME ||
-                      def.rotations.name == BlockRotProfile::PIPE_NAME){
+                      def.rotations.name == BlockRotProfile::PIPE_NAME ||
+                      def.rotations.name == BlockRotProfile::LADDER_NAME) {
                     if (voxel.state.rotation < 4) {
                         voxel.state.rotation = (voxel.state.rotation + 3) & 0b11;
                     }
+                } else if (def.rotations.name == BlockRotProfile::STAIRS_NAME) {
+                    voxel.state.rotation = ((voxel.state.rotation + 3) & 0b11) |
+                                            (voxel.state.rotation & 0b100);
                 }
             }
         }

@@ -14,6 +14,8 @@
 ///    int l_function_name(lua::State* L);
 
 // Libraries
+extern const luaL_Reg applib[];
+extern const luaL_Reg assetslib[];
 extern const luaL_Reg audiolib[];
 extern const luaL_Reg base64lib[];
 extern const luaL_Reg bjsonlib[];
@@ -36,9 +38,13 @@ extern const luaL_Reg mat4lib[];
 extern const luaL_Reg networklib[];
 extern const luaL_Reg packlib[];
 extern const luaL_Reg particleslib[]; // gfx.particles
+extern const luaL_Reg pathfindinglib[];
 extern const luaL_Reg playerlib[];
+extern const luaL_Reg posteffectslib[]; // gfx.posteffects
 extern const luaL_Reg quatlib[];
-extern const luaL_Reg applib[];
+extern const luaL_Reg randomlib[];
+extern const luaL_Reg compressionlib[];
+extern const luaL_Reg testlib[];
 extern const luaL_Reg text3dlib[]; // gfx.text3d
 extern const luaL_Reg timelib[];
 extern const luaL_Reg tomllib[];
@@ -46,8 +52,10 @@ extern const luaL_Reg utf8lib[];
 extern const luaL_Reg vec2lib[];  // vecn.cpp
 extern const luaL_Reg vec3lib[];  // vecn.cpp
 extern const luaL_Reg vec4lib[];  // vecn.cpp
-extern const luaL_Reg weatherlib[];
+extern const luaL_Reg weatherlib[]; // gfx.weather
 extern const luaL_Reg worldlib[];
+extern const luaL_Reg xmllib[];
+extern const luaL_Reg yamllib[];
 
 // Components
 extern const luaL_Reg skeletonlib[];

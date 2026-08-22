@@ -241,6 +241,8 @@ uniform vec3 u_xaxis;
 uniform vec3 u_yaxis;
 uniform vec3 u_zaxis;
 uniform vec3 u_lightDir;
+uniform vec3 u_tint;
+uniform vec3 u_hightlight;
 uniform int u_quality;
 uniform float u_mie;
 uniform float u_fog;
@@ -268,7 +270,11 @@ void main() {
         camera_vector, 					// the camera vector (ray direction of this pixel)
         1e12f, 						    // max dist, essentially the scene depth
         vec3(0.0f),						// scene color, the color of the current pixel being rendered
-        u_lightDir,						// light direction
+        vec3(
+            u_lightDir.x, 
+            u_lightDir.y,
+            u_lightDir.z
+        ),	// light direction
         vec3(40.0*fog),						// light intensity, 40 looks nice
         PLANET_POS,						// position of the planet
         PLANET_RADIUS,                  // radius of the planet in meters
@@ -291,5 +297,5 @@ void main() {
     col = 1.0 - exp(-col);
     col = min(col, vec3(1.0));
     // Output to screen
-    f_color = vec4(col, 1.0);
+    f_color = vec4(col * u_tint + u_hightlight, 1.0);
 }

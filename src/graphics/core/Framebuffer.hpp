@@ -1,28 +1,30 @@
 #pragma once
 
 #include "typedefs.hpp"
+#include "commons.hpp"
 
 #include <memory>
 
 class Texture;
 
-class Framebuffer {
+class Framebuffer : public Bindable {
     uint fbo;
     uint depth;
     uint width;
     uint height;
-    uint format;
-    std::unique_ptr<Texture> texture;
+    std::shared_ptr<Texture> texture;
 public:
     Framebuffer(uint fbo, uint depth, std::unique_ptr<Texture> texture);
     Framebuffer(uint width, uint height, bool alpha=false);
     ~Framebuffer();
 
+    void setTexture(std::unique_ptr<Texture> texture);
+
     /// @brief Use framebuffer
-    void bind();
+    void bind() const override;
 
     /// @brief Stop using framebuffer
-    void unbind();
+    void unbind() const override;
 
     /// @brief Update framebuffer texture size
     /// @param width new width
@@ -32,8 +34,12 @@ public:
     /// @brief Get framebuffer color attachment
     Texture* getTexture() const;
 
+    std::shared_ptr<Texture> getSharedTexture() const;
+
     /// @brief Get framebuffer width
     uint getWidth() const;
     /// @brief Get framebuffer height
     uint getHeight() const;
+
+    uint getFBO() const;
 };

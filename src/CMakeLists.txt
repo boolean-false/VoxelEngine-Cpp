@@ -19,6 +19,7 @@ find_package(ZLIB REQUIRED)
 find_package(PNG REQUIRED)
 find_package(CURL REQUIRED)
 find_package(glfw3 REQUIRED)
+find_package(Freetype REQUIRED)
 if(NOT APPLE)
     find_package(EnTT REQUIRED)
 endif()
@@ -36,6 +37,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
                 "$ENV{VCPKG_ROOT}/packages/luajit_${VCPKG_TARGET_TRIPLET}/include/"
         )
     else()
+        set(LUAJIT_PACKAGE_DIR "$ENV{VCPKG_ROOT}/packages/luajit_${VCPKG_TARGET_TRIPLET}")
+
+        if(EXISTS "$ENV{VCPKG_ROOT}/packages/luajit_${VCPKG_TARGET_TRIPLET}/include/luajit-2.1")
+            set(LUAJIT_INCLUDE_DIR "$ENV{VCPKG_ROOT}/packages/luajit_${VCPKG_TARGET_TRIPLET}/include/luajit-2.1")
+        else()
+            set(LUAJIT_INCLUDE_DIR "$ENV{VCPKG_ROOT}/packages/luajit_${VCPKG_TARGET_TRIPLET}/include/luajit")
+        endif()
+
         add_library(luajit SHARED IMPORTED)
         set_target_properties(
             luajit
@@ -44,8 +53,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
                 "$ENV{VCPKG_ROOT}/packages/luajit_${VCPKG_TARGET_TRIPLET}/bin/lua51.dll"
                 IMPORTED_IMPLIB
                 "$ENV{VCPKG_ROOT}/packages/luajit_${VCPKG_TARGET_TRIPLET}/lib/lua51.lib"
-                INTERFACE_INCLUDE_DIRECTORIES
-                "$ENV{VCPKG_ROOT}/packages/luajit_${VCPKG_TARGET_TRIPLET}/include/luajit"
+                INTERFACE_INCLUDE_DIRECTORIES "${LUAJIT_INCLUDE_DIR}"
         )
     endif()
 
@@ -75,6 +83,7 @@ target_link_libraries(
             Vorbis::vorbis
             Vorbis::vorbisfile
             luajit::luajit
+            Freetype::Freetype
     PUBLIC glm::glm # Need public for src/delegates.hpp, which including to
                     # main.cpp
 )
@@ -91,7 +100,9 @@ target_compile_options(
            /wd4245 # conversion from 'int' to 'const size_t', signed/unsigned
                    # mismatch
            /wd4100 # unreferenced formal parameter
+           /wd4457 # declaration of 'var' hides function parameter 
            /wd4458 # declaration of 'var' hides class member
+           /wd4459 # declaration of 'var' hides global declaration 
            /wd4101 # 'var': unreferenced local variable
            /wd4388 # 'token' : signed/unsigned mismatch
            /wd4018 # '>': signed/unsigned mismatch
@@ -101,6 +112,7 @@ target_compile_options(
            -Wextra
            # additional warnings
            -Wformat-nonliteral
+           #-Wsign-conversion
            -Wcast-align
            -Wpointer-arith
            -Wundef
@@ -108,7 +120,10 @@ target_compile_options(
            -Wno-unused-parameter
            -Wno-sign-compare
            -Wno-unknown-pragmas
-           $<$<CONFIG:Debug>:-Og>
+           >
+           $<$<CXX_COMPILER_ID:GNU>:
+           -Wduplicated-branches
+           -Wduplicated-cond
            >)
 
 target_link_options(

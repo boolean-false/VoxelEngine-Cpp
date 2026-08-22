@@ -1,40 +1,50 @@
 #pragma once
 
-#include "typedefs.hpp"
-#include "maths/UVRegion.hpp"
-#include "ImageData.hpp"
-
 #include <memory>
 
-class Texture {
+#include "ImageData.hpp"
+#include "commons.hpp"
+#include "maths/UVRegion.hpp"
+#include "typedefs.hpp"
+
+class Texture : public Bindable {
 protected:
+    uint id;
     uint width;
     uint height;
-
-    Texture(uint width, uint height) : width(width), height(height) {}
+    uint format;
 public:
-    static uint MAX_RESOLUTION;
+    Texture(uint id, uint width, uint height, ImageFormat imageFormat);
+    Texture(const ubyte* data, uint width, uint height, ImageFormat format);
+    virtual ~Texture();
 
-    virtual ~Texture() {}
+    virtual void bind() const override;
+    virtual void unbind() const override;
+    virtual void reload(const ubyte* data, uint w, uint h);
+    void reloadPartial(const ImageData& image, uint x, uint y, uint w, uint h);
 
-    virtual void bind() const = 0;
-    virtual void unbind() const = 0;
+    void setNearestFilter();
 
-    virtual void reload(const ImageData& image) = 0;
+    void reload(const ImageData& image);
+    virtual void resize(uint w, uint h);
 
-    virtual std::unique_ptr<ImageData> readData() = 0;
+    void setMipMapping(bool flag, bool pixelated);
 
-    virtual uint getWidth() const {
+    std::unique_ptr<ImageData> readData();
+    uint getId() const;
+
+    UVRegion getUVRegion() const {
+        return UVRegion(0.0f, 0.0f, 1.0f, 1.0f);
+    }
+
+    uint getWidth() const {
         return width;
     }
-    virtual uint getHeight() const {
+
+    uint getHeight() const {
         return height;
     }
-    virtual UVRegion getUVRegion() const = 0;
-
-    virtual uint getId() const = 0;
-
-    virtual void setMipMapping(bool flag, bool pixelated) = 0;
 
     static std::unique_ptr<Texture> from(const ImageData* image);
+    static uint MAX_RESOLUTION;
 };

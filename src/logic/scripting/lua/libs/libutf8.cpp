@@ -3,7 +3,6 @@
 #include <vector>
 #include <cwctype>
 
-#include "../lua_custom_types.hpp"
 #include "util/stringutil.hpp"
 
 static int l_tobytes(lua::State* L) {
@@ -14,13 +13,10 @@ static int l_tobytes(lua::State* L) {
             lua::pushinteger(L, string[i] & 0xFF);
             lua::rawseti(L, i+1);
         }
+        return 1;
     } else {
-        lua::newuserdata<lua::LuaBytearray>(L, string.length());
-        auto bytearray = lua::touserdata<lua::LuaBytearray>(L, -1);   
-        bytearray->data().reserve(string.length());
-        std::memcpy(bytearray->data().data(), string.data(), string.length());
+        return lua::create_bytearray(L, string.data(), string.length());
     }
-    return 1;
 }
 
 static int l_tostring(lua::State* L) {
@@ -35,16 +31,9 @@ static int l_tostring(lua::State* L) {
         }
         lua::pop(L);
         return lua::pushlstring(L, buffer.data(), size);
-    } else if (auto bytes = lua::touserdata<lua::LuaBytearray>(L, 1)) {
-        return lua::pushstring(
-            L,
-            std::string(
-                reinterpret_cast<char*>(bytes->data().data()),
-                bytes->data().size()
-            )
-        );
+    } else {
+        return lua::pushlstring(L, lua::bytearray_as_string(L, 1));
     }
-    return 1;
 }
 
 static int l_length(lua::State* L) {
@@ -68,23 +57,22 @@ static int l_sub(lua::State* L) {
     if (lua::gettop(L) >= 3) {
         end = std::max(0, static_cast<int>(lua::tointeger(L, 3) - 1));
     }
-    return lua::pushstring(L, util::u32str2str_utf8(string.substr(start, end)));
+    return lua::pushstring(
+        L,
+        util::u32str2str_utf8(
+            string.substr(start, (end >= start ? end - start + 1 : 0))
+        )
+    );
 }
 
 static int l_upper(lua::State* L) {
-    auto string = util::str2u32str_utf8(lua::require_string(L, 1));
-    for (auto& c : string) {
-        c = std::towupper(c);
-    }
-    return lua::pushstring(L, util::u32str2str_utf8(string));
+    auto string = util::str2wstr_utf8(lua::require_string(L, 1));
+    return lua::pushwstring(L, util::upper_case(string));
 }
 
 static int l_lower(lua::State* L) {
-    auto string = util::str2u32str_utf8(lua::require_string(L, 1));
-    for (auto& c : string) {
-        c = std::towlower(c);
-    }
-    return lua::pushstring(L, util::u32str2str_utf8(string));
+    auto string = util::str2wstr_utf8(lua::require_string(L, 1));
+    return lua::pushwstring(L, util::lower_case(string));
 }
 
 static int l_encode(lua::State* L) {
@@ -99,6 +87,11 @@ static int l_escape(lua::State* L) {
     return lua::pushstring(L, util::escape(string));
 }
 
+static int l_escape_xml(lua::State* L) {
+    auto string = lua::require_wstring(L, 1);
+    return lua::pushwstring(L, util::escape_xml(string));
+}
+
 const luaL_Reg utf8lib[] = {
     {"tobytes", lua::wrap<l_tobytes>},
     {"tostring", lua::wrap<l_tostring>},
@@ -109,5 +102,6 @@ const luaL_Reg utf8lib[] = {
     {"lower", lua::wrap<l_lower>},
     {"encode", lua::wrap<l_encode>},
     {"escape", lua::wrap<l_escape>},
-    {NULL, NULL}
+    {"escape_xml", lua::wrap<l_escape_xml>},
+    {nullptr, nullptr}
 };

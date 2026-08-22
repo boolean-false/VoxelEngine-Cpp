@@ -1,7 +1,6 @@
 #include "coders/binary_json.hpp"
 #include "api_lua.hpp"
 #include "util/Buffer.hpp"
-#include "../lua_custom_types.hpp"
 
 static int l_tobytes(lua::State* L) {
     auto value = lua::tovalue(L, 1);
@@ -9,9 +8,7 @@ static int l_tobytes(lua::State* L) {
     if (lua::gettop(L) >= 2) {
         compress = lua::toboolean(L, 2);
     }
-    return lua::newuserdata<lua::LuaBytearray>(
-        L, json::to_binary(value, compress)
-    );
+    return lua::create_bytearray(L, json::to_binary(value, compress));
 }
 
 static int l_frombytes(lua::State* L) {
@@ -24,17 +21,18 @@ static int l_frombytes(lua::State* L) {
             lua::pop(L);
         }
         return lua::pushvalue(L, json::from_binary(buffer.data(), len));
-    } else if (auto bytes = lua::touserdata<lua::LuaBytearray>(L, -1)) {
-        const auto& buffer = bytes->data();
-        return lua::pushvalue(
-            L, json::from_binary(buffer.data(), buffer.size())
-        );
     } else {
-        throw std::runtime_error("table or Bytearray expected");
+        auto string = lua::bytearray_as_string(L, 1);
+        auto out = json::from_binary(
+            reinterpret_cast<const ubyte*>(string.data()), string.size()
+        );
+        lua::pop(L);
+        return lua::pushvalue(L, std::move(out));
     }
 }
 
 const luaL_Reg bjsonlib[] = {
     {"tobytes", lua::wrap<l_tobytes>},
     {"frombytes", lua::wrap<l_frombytes>},
-    {NULL, NULL}};
+    {nullptr, nullptr}
+};

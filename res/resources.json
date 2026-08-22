@@ -4,5 +4,9 @@
         "third-person-front",
         "third-person-back",
         "cinematic"
+    ],
+    "post-effect-slot": [
+        "default",
+        "ssao"
     ]
 }

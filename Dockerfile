@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     g++ \
     make \
     cmake \
+    pkg-config \
     xauth \
     gdb \
     gdbserver \
@@ -24,11 +25,21 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     libluajit-5.1-dev \
     libvorbis-dev \
     libcurl4-openssl-dev \
+    libfreetype6-dev \
     ca-certificates \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Install EnTT
-RUN git clone https://github.com/skypjack/entt.git && \
+# Установка CMake >= 3.26 вручную
+ARG CMAKE_VERSION=3.27.9
+RUN wget https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.sh && \
+    chmod +x cmake-${CMAKE_VERSION}-linux-x86_64.sh && \
+    ./cmake-${CMAKE_VERSION}-linux-x86_64.sh --skip-license --prefix=/usr/local && \
+    rm cmake-${CMAKE_VERSION}-linux-x86_64.sh
+
+
+# Install specific EnTT version (the latest version that supports C++17).
+RUN git clone --branch v3.16.0 https://github.com/skypjack/entt.git && \
     cd entt/build && \
     cmake -DCMAKE_BUILD_TYPE=Release -DENTT_INSTALL=on .. && \
     make install && \

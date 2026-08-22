@@ -2,6 +2,7 @@
 
 #include "delegates.hpp"
 #include "graphics/core/commons.hpp"
+#include "util/CallbacksSet.hpp"
 #include "window/input.hpp"
 
 #include <glm/glm.hpp>
@@ -19,51 +20,81 @@ namespace gui {
     class GUI;
     class Container;
 
-    using onaction = std::function<void(GUI*)>;
-    using onnumberchange = std::function<void(GUI*, double)>;
+    using OnAction = std::function<void(GUI&)>;
+    using OnNumberChange = std::function<void(GUI&, double)>;
+    using OnStringChange = std::function<void(GUI&, const std::string&)>;
 
-    class ActionsSet {
-        std::unique_ptr<std::vector<onaction>> callbacks;
+    template<class TagT, typename... Args>
+    class TaggedCallbacksSet {
     public:
-        void listen(const onaction& callback) {
+        using Func = std::function<void(Args...)>;
+    private:
+        std::unique_ptr<std::vector<std::pair<TagT, Func>>> callbacks;
+    public:
+        void listen(TagT tag, Func&& callback) {
             if (callbacks == nullptr) {
-                callbacks = std::make_unique<std::vector<onaction>>();
+                callbacks =
+                    std::make_unique<std::vector<std::pair<TagT, Func>>>();
             }
-            callbacks->push_back(callback);
+            callbacks->push_back({tag, std::move(callback)});
         }
 
-        void notify(GUI* gui) {
-            if (callbacks) {
-                for (auto& callback : *callbacks) {
-                    callback(gui);
+        void notify(TagT notifyTag, Args&&... args) {
+            if (callbacks == nullptr) {
+                return;
+            }
+            for (const auto& [tag, callback] : * callbacks) {
+                if (tag != notifyTag) {
+                    continue;
                 }
+                callback(args...);
             }
         }
     };
+
+    enum class UIAction {
+        CLICK,
+        DOUBLE_CLICK,
+        FOCUS,
+        DEFOCUS,
+        RIGHT_CLICK,
+        MIDDLE_CLICK,
+        MOUSE_OVER,
+        MOUSE_OUT,
+        MOUSE_ENTER,
+        MOUSE_LEAVE,
+    };
+
+    using ActionsSet = TaggedCallbacksSet<UIAction, GUI&>;
+    using StringCallbacksSet = CallbacksSet<GUI&, const std::string&>;
     
     enum class Align {
-        left, center, right,
-        top=left, bottom=right,
+        LEFT, CENTER, RIGHT,
+        TOP=LEFT, BOTTOM=RIGHT,
     };
 
     enum class Gravity {
-        none,
+        NONE,
         
-        top_left,
-        top_center,
-        top_right,
+        TOP_LEFT,
+        TOP_CENTER,
+        TOP_RIGHT,
 
-        center_left,
-        center_center,
-        center_right,
+        CENTER_LEFT,
+        CENTER_CENTER,
+        CENTER_RIGHT,
 
-        bottom_left,
-        bottom_center,
-        bottom_right
+        BOTTOM_LEFT,
+        BOTTOM_CENTER,
+        BOTTOM_RIGHT
     };
 
     /// @brief Base abstract class for all UI elements
     class UINode : public std::enable_shared_from_this<UINode> {
+    protected:
+        GUI& gui;
+        bool mustRefresh = true;
+    private:
         /// @brief element identifier used for direct access in UiDocument
         std::string id = "";
         /// @brief element enabled state
@@ -100,17 +131,15 @@ namespace gui {
         /// @brief z-index property specifies the stack order of an element
         int zindex = 0;
         /// @brief element content alignment (supported by Label only)
-        Align align = Align::left;
+        Align align = Align::LEFT;
         /// @brief parent element
         UINode* parent = nullptr;
         /// @brief position supplier for the element (called on parent element size update)
         vec2supplier positionfunc = nullptr;
         /// @brief size supplier for the element (called on parent element size update)
         vec2supplier sizefunc = nullptr;
-        /// @brief 'onclick' callbacks
+        /// @brief parameterless callbacks
         ActionsSet actions;
-        /// @brief 'ondoubleclick' callbacks
-        ActionsSet doubleClickCallbacks;
         /// @brief element tooltip text
         std::wstring tooltip;
         /// @brief element tooltip delay
@@ -118,13 +147,18 @@ namespace gui {
         /// @brief cursor shape when mouse is over the element
         CursorShape cursor = CursorShape::ARROW;
 
-        UINode(glm::vec2 size);
+        UINode(GUI& gui, glm::vec2 size);
     public:
         virtual ~UINode();
 
         /// @brief Called every frame for all visible elements 
         /// @param delta delta timУ
-        virtual void act(float delta) {};
+        virtual void act(float delta) {
+            if (mustRefresh) {
+                mustRefresh = false;
+                refresh();
+            }
+        };
         virtual void draw(const DrawContext& pctx, const Assets& assets) = 0;
 
         virtual void setVisible(bool flag);
@@ -136,11 +170,14 @@ namespace gui {
         virtual void setAlign(Align align);
         Align getAlign() const;
 
-        virtual void setHover(bool flag);
+        virtual void setMouseEnter(bool flag);
         bool isHover() const;
+
+        void setMouseOver(bool flag);
 
         virtual void setParent(UINode* node);
         UINode* getParent() const;
+        std::shared_ptr<UINode> getParentShared() const;
 
         /// @brief Set element color (doesn't affect inner elements).
         /// Also replaces hover color to avoid adding extra properties
@@ -166,15 +203,14 @@ namespace gui {
         /// @brief Get element z-index
         int getZIndex() const;
 
-        virtual UINode* listenAction(const onaction &action);
-        virtual UINode* listenDoubleClick(const onaction &action);
+        void listenAction(UIAction type, OnAction action);
 
-        virtual void onFocus(GUI*) {focused = true;}
-        virtual void doubleClick(GUI*, int x, int y);
-        virtual void click(GUI*, int x, int y);
-        virtual void clicked(GUI*, mousecode button) {}
-        virtual void mouseMove(GUI*, int x, int y) {};
-        virtual void mouseRelease(GUI*, int x, int y);
+        virtual void onFocus();
+        virtual void doubleClick(int x, int y);
+        virtual void click(int x, int y);
+        virtual void clicked(Mousecode button);
+        virtual void mouseMove(int x, int y) {};
+        virtual void mouseRelease(int x, int y);
         virtual void scrolled(int value);
 
         bool isPressed() const;
@@ -185,7 +221,7 @@ namespace gui {
         virtual bool isFocuskeeper() const {return false;}
 
         virtual void typed(unsigned int codepoint) {};
-        virtual void keyPressed(keycode key) {};
+        virtual void keyPressed(Keycode key) {};
 
         /// @brief Check if screen position is inside of the element 
         /// @param pos screen position
@@ -217,17 +253,17 @@ namespace gui {
         virtual glm::vec4 calcColor() const;
 
         /// @brief Get inner content offset. Used for scroll
-        virtual glm::vec2 getContentOffset() {return glm::vec2(0.0f);};
+        virtual glm::vec2 getContentOffset() const {return glm::vec2(0.0f);};
         /// @brief Calculate screen position of the element
         virtual glm::vec2 calcPos() const;
-        virtual void setPos(glm::vec2 pos);
+        virtual void setPos(const glm::vec2& pos);
         virtual glm::vec2 getPos() const;
-        virtual glm::vec2 getSize() const;
-        virtual void setSize(glm::vec2 size);
-        virtual glm::vec2 getMinSize() const;
-        virtual void setMinSize(glm::vec2 size);
-        virtual glm::vec2 getMaxSize() const;
-        virtual void setMaxSize(glm::vec2 size);
+        glm::vec2 getSize() const;
+        virtual void setSize(const glm::vec2& size);
+        glm::vec2 getMinSize() const;
+        virtual void setMinSize(const glm::vec2& size);
+        glm::vec2 getMaxSize() const;
+        virtual void setMaxSize(const glm::vec2& size);
         /// @brief Called in containers when new element added
         virtual void refresh() {};
         virtual void fullRefresh() {
@@ -259,12 +295,16 @@ namespace gui {
         /// @brief collect all nodes having id
         static void getIndices(
             const std::shared_ptr<UINode>& node,
-            std::unordered_map<std::string, std::shared_ptr<UINode>>& map
+            std::unordered_map<std::string, std::weak_ptr<UINode>>& map
         );
 
         static std::shared_ptr<UINode> find(
             const std::shared_ptr<UINode>& node,
             const std::string& id
         );
+
+        void setMustRefresh() {
+            mustRefresh = true;
+        }
     };
 }

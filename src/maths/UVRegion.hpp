@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cmath>
-#include <glm/vec2.hpp>
+#include <glm/glm.hpp>
 
 struct UVRegion {
     float u1;
@@ -42,13 +42,36 @@ struct UVRegion {
     }
 
     void scale(float x, float y) {
-        float w = getWidth();
-        float h = getHeight();
+        float w = u2 - u1;
+        float h = v2 - v1;
         float cx = (u1 + u2) * 0.5f;
         float cy = (v1 + v2) * 0.5f;
         u1 = cx - w * 0.5f * x;
         v1 = cy - h * 0.5f * y;
         u2 = cx + w * 0.5f * x;
         v2 = cy + h * 0.5f * y;
+    }
+
+    void scale(const glm::vec2& vec) {
+        scale(vec.x, vec.y);
+    }
+
+    void set(const glm::vec4& vec) {
+        u1 = vec.x;
+        v1 = vec.y;
+        u2 = vec.z;
+        v2 = vec.w;
+    }
+
+    UVRegion operator*(const glm::vec2& scale) const {
+        auto copy = UVRegion(*this);
+        copy.scale(scale);
+        return copy;
+    }
+
+    bool isFull() const {
+        const auto e = 1e-7;
+        return glm::abs(u1 - 0.0) < e && glm::abs(v1 - 0.0) < e &&
+               glm::abs(u2 - 1.0) < e && glm::abs(v2 - 1.0) < e;
     }
 };

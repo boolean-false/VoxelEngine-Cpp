@@ -25,10 +25,11 @@ static void set_blend_mode(BlendMode mode) {
 
 DrawContext::DrawContext(
     const DrawContext* parent, 
-    Viewport  viewport,
+    Window& window,
     Batch2D* g2d
-) : parent(parent), 
-    viewport(std::move(viewport)),
+) : window(window),
+    parent(parent), 
+    viewport(window.getSize()),
     g2d(g2d),
     flushable(g2d)
 {}
@@ -39,7 +40,7 @@ DrawContext::~DrawContext() {
     }
 
     while (scissorsCount--) {
-        Window::popScissor();
+        window.popScissor();
     }
 
     if (parent == nullptr)
@@ -54,11 +55,7 @@ DrawContext::~DrawContext() {
         }
     }
 
-    Window::viewport(
-        0, 0,
-        parent->viewport.getWidth(), 
-        parent->viewport.getHeight()
-    );
+    glViewport(0, 0, parent->viewport.x, parent->viewport.y);
 
     if (depthMask != parent->depthMask) {
         glDepthMask(parent->depthMask);
@@ -77,9 +74,21 @@ DrawContext::~DrawContext() {
     if (lineWidth != parent->lineWidth) {
         glLineWidth(parent->lineWidth);
     }
+
+    for (int i = 0; i < textures.size(); i++) {
+        auto texture = parent->textures[i];
+        if (textures[i] != texture) {
+            glActiveTexture(GL_TEXTURE0 + i);
+            if (texture == nullptr) {
+                glBindTexture(GL_TEXTURE_2D, 0);
+            } else {
+                texture->bind();
+            }
+        }
+    }
 }
 
-const Viewport& DrawContext::getViewport() const {
+const glm::uvec2& DrawContext::getViewport() const {
     return viewport;
 }
 
@@ -98,16 +107,12 @@ DrawContext DrawContext::sub(Flushable* flushable) const {
     return ctx;
 }
 
-void DrawContext::setViewport(const Viewport& viewport) {
+void DrawContext::setViewport(const glm::uvec2& viewport) {
     this->viewport = viewport;
-    Window::viewport(
-        0, 0,
-        viewport.getWidth(),
-        viewport.getHeight()
-    );
+    glViewport(0, 0, viewport.x, viewport.y);
 }
 
-void DrawContext::setFramebuffer(Framebuffer* fbo) {
+void DrawContext::setFramebuffer(Bindable* fbo) {
     if (this->fbo == fbo)
         return;
     this->fbo = fbo;
@@ -153,11 +158,21 @@ void DrawContext::setBlendMode(BlendMode mode) {
 }
 
 void DrawContext::setScissors(const glm::vec4& area) {
-    Window::pushScissor(area);
+    window.pushScissor(area);
     scissorsCount++;
 }
 
 void DrawContext::setLineWidth(float width) {
     lineWidth = width;
     glLineWidth(width);
+}
+
+void DrawContext::useTexture(int target, const Bindable* texture) {
+    glActiveTexture(GL_TEXTURE0 + target);
+    if (texture == nullptr) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+    } else {
+        texture->bind();
+    }
+    textures.at(target) = texture;
 }

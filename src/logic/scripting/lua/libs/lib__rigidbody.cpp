@@ -1,3 +1,5 @@
+#define VC_ENABLE_REFLECTION
+
 #include "util/stringutil.hpp"
 #include "libentity.hpp"
 
@@ -52,7 +54,12 @@ static int l_get_gravity_scale(lua::State* L) {
 
 static int l_set_gravity_scale(lua::State* L) {
     if (auto entity = get_entity(L, 1)) {
-        entity->getRigidbody().hitbox.gravityScale = lua::tonumber(L, 2);
+        auto& hitbox = entity->getRigidbody().hitbox;
+        if (lua::istable(L, 2)) {
+            hitbox.gravityScale = lua::tovec3(L, 2).y;
+        } else {
+            hitbox.gravityScale = lua::tonumber(L, 2);
+        }
     }
     return 0;
 }
@@ -60,6 +67,15 @@ static int l_set_gravity_scale(lua::State* L) {
 static int l_is_vdamping(lua::State* L) {
     if (auto entity = get_entity(L, 1)) {
         return lua::pushboolean(
+            L, entity->getRigidbody().hitbox.verticalDamping > 0.0
+        );
+    }
+    return 0;
+}
+
+static int l_get_vdamping(lua::State* L) {
+    if (auto entity = get_entity(L, 1)) {
+        return lua::pushnumber(
             L, entity->getRigidbody().hitbox.verticalDamping
         );
     }
@@ -68,7 +84,11 @@ static int l_is_vdamping(lua::State* L) {
 
 static int l_set_vdamping(lua::State* L) {
     if (auto entity = get_entity(L, 1)) {
-        entity->getRigidbody().hitbox.verticalDamping = lua::toboolean(L, 2);
+        if (lua::isboolean(L, 2)) {
+            entity->getRigidbody().hitbox.verticalDamping = lua::toboolean(L, 2);
+        } else {
+            entity->getRigidbody().hitbox.verticalDamping = lua::tonumber(L, 2);
+        }
     }
     return 0;
 }
@@ -96,8 +116,8 @@ static int l_set_crouching(lua::State* L) {
 
 static int l_get_body_type(lua::State* L) {
     if (auto entity = get_entity(L, 1)) {
-        return lua::pushstring(
-            L, to_string(entity->getRigidbody().hitbox.type)
+        return lua::pushlstring(
+            L, BodyTypeMeta.getName(entity->getRigidbody().hitbox.type)
         );
     }
     return 0;
@@ -105,9 +125,9 @@ static int l_get_body_type(lua::State* L) {
 
 static int l_set_body_type(lua::State* L) {
     if (auto entity = get_entity(L, 1)) {
-        if (auto type = BodyType_from(lua::tostring(L, 2))) {
-            entity->getRigidbody().hitbox.type = *type;
-        } else {
+        if (!BodyTypeMeta.getItem(
+                lua::tostring(L, 2), entity->getRigidbody().hitbox.type
+            )) {
             throw std::runtime_error(
                 "unknown body type " + util::quote(lua::tostring(L, 2))
             );
@@ -130,6 +150,56 @@ static int l_set_linear_damping(lua::State* L) {
     return 0;
 }
 
+static int l_set_material(lua::State* L) {
+    if (auto entity = get_entity(L, 1)) {
+        entity->getRigidbody().hitbox.material = lua::require_string(L, 2);
+    }
+    return 0;
+}
+
+static int l_get_material(lua::State* L) {
+    if (auto entity = get_entity(L, 1)) {
+        return lua::pushstring(L, entity->getRigidbody().hitbox.material);
+    }
+    return 0;
+}
+
+static int l_get_mass(lua::State* L) {
+    if (auto entity = get_entity(L, 1)) {
+        return lua::pushnumber(L, entity->getRigidbody().mass);
+    }
+    return 0;
+}
+
+static int l_set_mass(lua::State* L) {
+    if (auto entity = get_entity(L, 1)) {
+        entity->getRigidbody().mass = lua::tonumber(L, 2);
+    }
+    return 0;
+}
+
+static int l_get_elasticity(lua::State* L) {
+    if (auto entity = get_entity(L, 1)) {
+        return lua::pushnumber(L, entity->getRigidbody().elasticity);
+    }
+    return 0;
+}
+
+static int l_set_elasticity(lua::State* L) {
+    if (auto entity = get_entity(L, 1)) {
+        entity->getRigidbody().elasticity = lua::tonumber(L, 2);
+    }
+    return 0;
+}
+
+static int l_get_ground_vel(lua::State* L) {
+    if (auto entity = get_entity(L, 1)) {
+        return lua::pushvec3(L, entity->getRigidbody().hitbox.groundVelocity);
+    }
+    return 0;
+}
+
+
 const luaL_Reg rigidbodylib[] = {
     {"is_enabled", lua::wrap<l_is_enabled>},
     {"set_enabled", lua::wrap<l_set_enabled>},
@@ -142,10 +212,19 @@ const luaL_Reg rigidbodylib[] = {
     {"get_linear_damping", lua::wrap<l_get_linear_damping>},
     {"set_linear_damping", lua::wrap<l_set_linear_damping>},
     {"is_vdamping", lua::wrap<l_is_vdamping>},
+    {"get_vdamping", lua::wrap<l_get_vdamping>},
     {"set_vdamping", lua::wrap<l_set_vdamping>},
     {"is_grounded", lua::wrap<l_is_grounded>},
     {"is_crouching", lua::wrap<l_is_crouching>},
     {"set_crouching", lua::wrap<l_set_crouching>},
     {"get_body_type", lua::wrap<l_get_body_type>},
     {"set_body_type", lua::wrap<l_set_body_type>},
-    {NULL, NULL}};
+    {"set_material", lua::wrap<l_set_material>},
+    {"get_material", lua::wrap<l_get_material>},
+    {"get_mass", lua::wrap<l_get_mass>},
+    {"set_mass", lua::wrap<l_set_mass>},
+    {"get_elasticity", lua::wrap<l_get_elasticity>},
+    {"set_elasticity", lua::wrap<l_set_elasticity>},
+    {"get_ground_vel", lua::wrap<l_get_ground_vel>},
+    {nullptr, nullptr}
+};

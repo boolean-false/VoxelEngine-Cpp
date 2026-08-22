@@ -6,6 +6,7 @@
 #include "content/Content.hpp"
 #include "frontend/UiDocument.hpp"
 #include "frontend/hud.hpp"
+#include "content/ContentControl.hpp"
 #include "graphics/ui/elements/InventoryView.hpp"
 #include "items/Inventories.hpp"
 #include "logic/BlocksController.hpp"
@@ -45,7 +46,7 @@ static int l_open(lua::State* L) {
     }
     return lua::pushinteger(L, hud->openInventory(
         layout,
-        level->inventories->get(invid),
+        lua::isnoneornil(L, 3) ? nullptr : level->inventories->get(invid),
         playerInventory
     )->getId());
 }
@@ -139,6 +140,24 @@ static int l_get_block_inventory(lua::State* L) {
     }
 }
 
+static int l_get_second_inventory(lua::State* L) {
+    auto inventory = hud->getSecondInventory();
+    if (inventory == nullptr) {
+        return lua::pushinteger(L, 0);
+    } else {
+        return lua::pushinteger(L, inventory->getId());
+    }
+}
+
+static int l_get_exchange_inventory(lua::State* L) {
+    auto inventory = hud->getExchangeInventory();
+    if (inventory == nullptr) {
+        return lua::pushinteger(L, 0);
+    } else {
+        return lua::pushinteger(L, inventory->getId());
+    }
+}
+
 static int l_get_player(lua::State* L) {
     auto player = hud->getPlayer();
     return lua::pushinteger(L, player->getId());
@@ -150,6 +169,10 @@ static int l_is_paused(lua::State* L) {
 
 static int l_is_inventory_open(lua::State* L) {
     return lua::pushboolean(L, hud->isInventoryOpen());
+}
+
+static int l_is_player_inventory_open(lua::State* L) {
+    return lua::pushboolean(L, hud->isPlayerInventoryOpen());
 }
 
 static int l_is_content_access(lua::State* L) {
@@ -176,7 +199,7 @@ static int l_reload_script(lua::State* L) {
     if (content == nullptr) {
         throw std::runtime_error("content is not initialized");
     }
-    auto& writeableContent = *engine->getWriteableContent();
+    auto& writeableContent = *content_control->get();
     auto pack = writeableContent.getPackRuntime(packid);
     const auto& info = pack->getInfo();
     scripting::load_hud_script(
@@ -188,6 +211,11 @@ static int l_reload_script(lua::State* L) {
     return 0;
 }
 
+static int l_is_open(lua::State* L) {
+    auto layoutid = lua::require_string(L, 1);
+    return lua::pushboolean(L, hud->isOpen(layoutid));
+}
+
 const luaL_Reg hudlib[] = {
     {"open_inventory", wrap_hud<l_open_inventory>},
     {"close_inventory", wrap_hud<l_close_inventory>},
@@ -196,16 +224,20 @@ const luaL_Reg hudlib[] = {
     {"open_permanent", wrap_hud<l_open_permanent>},
     {"show_overlay", wrap_hud<l_show_overlay>},
     {"get_block_inventory", wrap_hud<l_get_block_inventory>},
+    {"get_second_inventory", wrap_hud<l_get_second_inventory>},
+    {"get_exchange_inventory", wrap_hud<l_get_exchange_inventory>},
     {"close", wrap_hud<l_close>},
     {"pause", wrap_hud<l_pause>},
     {"resume", wrap_hud<l_resume>},
     {"is_paused", wrap_hud<l_is_paused>},
     {"is_inventory_open", wrap_hud<l_is_inventory_open>},
+    {"is_player_inventory_open", wrap_hud<l_is_player_inventory_open>},
     {"get_player", wrap_hud<l_get_player>},
     {"_is_content_access", wrap_hud<l_is_content_access>},
     {"_set_content_access", wrap_hud<l_set_content_access>},
     {"_set_debug_cheats", wrap_hud<l_set_debug_cheats>},
     {"set_allow_pause", wrap_hud<l_set_allow_pause>},
     {"reload_script", wrap_hud<l_reload_script>},
-    {NULL, NULL}
+    {"is_open", wrap_hud<l_is_open>},
+    {nullptr, nullptr}
 };

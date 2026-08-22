@@ -39,7 +39,16 @@ Examples:
 - `position-func` - position supplier for an element (two numbers), called on every parent container size update or on element adding on a container. May be called before *on_hud_open*
 - `size-func` - element size provider (two numbers), called when the size of the container in which the element is located changes, or when an element is added to the container. Can be called before on_hud_open is called.
 - `onclick` - lua function called when an element is clicked.
+- `onrightclick` - lua function called when the right mouse button is pressed on an element.
+- `onmiddleclick` - lua function called when the middle mouse button is pressed on an element.
 - `ondoubleclick` - lua function called when you double click on an element.
+- `onfocus` - lua function called when focusing on an element.
+- `ondefocus` - lua function called when the element loses focus.
+- `onmouseenter` - lua function called when the cursor enters an element.
+- `onmouseleave` - lua function called when the cursor leaves an element.
+- `onmouseover` - lua function called when the cursor hovers over an element.
+- `onmouseout` - lua function called when the cursor exits an element.
+   onmouseenter and onmouseleave do not respect the elements hierarchy.
 - `tooltip` - tooltip text
 - `tooltip-delay` - tooltip show-up delay
 - `gravity` - automatic positioning of the element in the container. (Does not work in automatic containers like panel). Values: *top-left, top-center, top-right, center-left, center-center, center-right, bottom-left, bottom-center, bottom-right*.
@@ -91,6 +100,7 @@ A panel that controls the size and position of two elements. Allows the user to 
 
 Inner text is a button text.
 
+- `font` - font name
 - `text-align` - inner text alignment (*left/center/right*). Type: string.
 
 ## *checkbox*
@@ -101,6 +111,8 @@ Inner text is a button text.
 
 ## *label*
 
+- `font` - font name
+- `text-align` - text alignment (*left/center/right*). Type: string.
 - `valign` - vertical text alignment: top/center/bottom.
 - `supplier` - text supplier (called every frame).
 - `autoresize` - automatic change of element size (default - false). Does not affect font size.
@@ -112,6 +124,8 @@ Inner text is a button text.
 
 - `src` - name of an image stored in textures folder. Extension is not specified. Type: string.
   Example: *gui/error*
+- `fallback` - a fallback texture displayed when the main texture is missing / loading.
+- `region` - image region x1, y1, x2, y2 from 0.0, 0.0 (upper left corner), 1.0, 1.0 (lower right corner)
 
 ## *canvas*
 
@@ -121,6 +135,7 @@ Inner text is a button text.
 
 Inner text - initially entered text
 
+- `font` - font name
 - `placeholder` - placeholder text (used if the text field is empty)
 - `hint` - text displayed if the text field is empty (not sent to consumer, sub-consumer and validator).
 - `supplier` - text supplier (called every frame)
@@ -133,6 +148,7 @@ The key code for comparison can be obtained via `input.keycode("key_name")`
 - `text-wrap` - allows automatic text wrapping (works only with multiline: "true")
 - `editable` - determines whether the text can be edited.
 - `line-numbers` - enables line numbers display.
+- `keep-line-selection` - keep showing selected line after defocus.
 - `error-color` - color when entering incorrect data (the text does not pass the validator check). Type: RGBA color.
 - `text-color` - text color. Type: RGBA color.
 - `validator` - lua function that checks text for correctness. Takes a string as input, returns true if the text is correct.
@@ -153,6 +169,42 @@ The key code for comparison can be obtained via `input.keycode("key_name")`
 - `sub-consumer` - Lua function that receives intermediate values ​​(use to update text when `change-on-release="true"`)
 - `supplier` - Lua function - value supplier
 - `change-on-release` - Call consumer on trackbar release only. Type: boolean. Default: false
+
+## Inline frame - *iframe*
+
+Container for embedding an external document. Content is scaling to the iframe size.
+
+- `src` - document id in the format `pack:name` (`pack/layouts/name.xml`)
+
+## *select*
+
+Drop-down list. Options are described by `option` sub-elements, the `value` attribute of which contains the value, the inner text is the text displayed in the UI.
+
+Example of list description:
+
+```xml
+<select selected="entity" width="200"
+        onselect="function(opt) print(opt) end">
+    <option value="block">Block</option>
+    <option value="item">Item</option>
+    <option value="entity">Entity</option>
+</select>
+```
+
+- `width` - minimum content width. Default: 100.
+- `selected` - initially selected value. Default: "".
+- `onselect` - function to which the user-selected value is passed
+- `mode` - behaviour / display mode:
+    - `select` - default mode.
+    - `button` - button mode: the text is not replaced with the selected option; the element rendered as a regular button.
+
+## *bindbox*
+
+An element for displaying and editing key or mouse button bindings.
+
+- `font` - font name. Type: string.
+- `binding` - binding name. Type: string.
+- `padding` - padding between text and element borders. Type: number. Default: 6
 
 # Inventory elements
 
@@ -177,9 +229,6 @@ Element must be in direct sub-element of *inventory*.
 ## *slots-grid*
 
 - `start-index` - inventory slot index of the first slot. Type: integer
-- `rows` - number of grid rows (unnecessary if *cols* and *count* specified). Type: integer
-- `cols` - number of grid columns (unnecessary if *rows* and *count* specified). Type: integer
-- `count` - total number of slots in grid (unnecessary if *rows* and *cols* specified). Type: integer
 - `interval` - visual slots interval. Type: number
 - `padding` - grid padding (not slots interval). Type: number. (*deprecated*)
 - `sharefunc` - Lua event called on <btn>LMB</btn> + <btn>Shift</btn>. Inventory id and slot index passed as arguments.
@@ -187,3 +236,8 @@ Element must be in direct sub-element of *inventory*.
 - `onrightclick` - Lua event called on <btn>RMB</btn> click. Inventory id and slot index passed as arguments.
 - `taking` - the ability to take an item from a slot.
 - `placing` - the ability to put an item in a slot.
+
+Slots configuration (just specify two attributes):
+- `rows` - ​​number of rows. Type: integer
+- `cols` - number of columns. Type: integer
+- `count` - total number of slots. Type: integer

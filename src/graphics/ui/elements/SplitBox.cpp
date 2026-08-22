@@ -1,21 +1,23 @@
 #include "SplitBox.hpp"
 
+#include "util/stack_vector.hpp"
+
 using namespace gui;
 
-SplitBox::SplitBox(const glm::vec2& size, float splitPos, Orientation orientation)
- : BasePanel(size, glm::vec4(), 4.0f, orientation), splitPos(splitPos) {
+SplitBox::SplitBox(GUI& gui, const glm::vec2& size, float splitPos, Orientation orientation)
+ : BasePanel(gui, size, glm::vec4(), 4.0f, orientation), splitPos(splitPos) {
     setCursor(
-        orientation == Orientation::vertical ? CursorShape::NS_RESIZE
+        orientation == Orientation::VERTICAL ? CursorShape::NS_RESIZE
                                              : CursorShape::EW_RESIZE
     );
 }
 
-void SplitBox::mouseMove(GUI*, int x, int y) {
+void SplitBox::mouseMove(int x, int y) {
     auto pos = calcPos();
     auto size = getSize();
     
     glm::ivec2 cursor(x - pos.x, y - pos.y);
-    int axis = orientation == Orientation::vertical;
+    int axis = orientation == Orientation::VERTICAL;
 
     int v = cursor[axis];
     v = std::max(std::min(static_cast<int>(size[axis]) - 10, v), 10);
@@ -28,25 +30,38 @@ void SplitBox::mouseMove(GUI*, int x, int y) {
 void SplitBox::refresh() {
     Container::refresh();
 
-    if (nodes.empty()) {
+    util::stack_vector<UINode*, 2> visibleNodes;
+
+    for (const auto& node : nodes) {
+        if (!node->isVisible()) {
+            continue;
+        }
+        visibleNodes.push_back(node.get());
+        if (visibleNodes.full()) {
+            break;
+        }
+    }
+
+    if (visibleNodes.empty()) {
         return;
     }
+
     glm::vec2 size = getSize();
-    if (nodes.size() == 1) {
-        auto node = nodes.at(0);
+    if (visibleNodes.size() == 1) {
+        auto node = visibleNodes.at(0);
         node->setPos(glm::vec2());
         node->setSize(size);
         return;
     }
-    auto nodeA = nodes.at(0);
-    auto nodeB = nodes.at(1);
+    auto nodeA = visibleNodes.at(0);
+    auto nodeB = visibleNodes.at(1);
 
     float sepRadius = interval / 2.0f;
     
     nodeA->setPos(glm::vec2(padding));
 
     const auto& p = padding;
-    if (orientation == Orientation::vertical) {
+    if (orientation == Orientation::VERTICAL) {
         float splitPos = this->splitPos * size.y;
         nodeA->setSize({size.x-p.x-p.z, splitPos - sepRadius - p.y});
         nodeB->setSize({size.x-p.x-p.z, size.y - splitPos - sepRadius - p.w});
@@ -59,7 +74,7 @@ void SplitBox::refresh() {
     }
 }
 
-void SplitBox::doubleClick(GUI*, int x, int y) {
+void SplitBox::doubleClick(int x, int y) {
     if (nodes.size() < 2) {
         return;
     }

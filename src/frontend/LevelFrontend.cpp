@@ -10,59 +10,100 @@
 #include "logic/LevelController.hpp"
 #include "logic/PlayerController.hpp"
 #include "objects/Player.hpp"
+#include "physics/Hitbox.hpp"
 #include "voxels/Block.hpp"
+#include "voxels/Chunks.hpp"
 #include "world/Level.hpp"
+#include "engine/Engine.hpp"
 
 LevelFrontend::LevelFrontend(
-    Player* currentPlayer,
-    LevelController* controller,
-    Assets& assets,
+    Engine& engine,
+    PlayerController& playerController,
+    LevelController& controller,
     const EngineSettings& settings
 )
-    : level(*controller->getLevel()),
+    : level(*controller.getLevel()),
       controller(controller),
-      assets(assets),
+      assets(*engine.getAssets()),
       contentCache(std::make_unique<ContentGfxCache>(
           level.content, assets, settings.graphics
       )) {
     assets.store(
         BlocksPreview::build(
-            *contentCache, assets, *level.content.getIndices()
+            engine.getWindow(),
+            *contentCache,
+            *engine.getAssets(),
+            *level.content.getIndices()
         ),
         "block-previews"
     );
-    controller->getBlocksController()->listenBlockInteraction(
-        [currentPlayer, controller, &assets](auto player, const auto& pos, const auto& def, BlockInteraction type) {
-            const auto& level = *controller->getLevel();
+
+    auto& currentPlayer = playerController.getPlayer();
+    auto& assets = this->assets;
+    auto& level = this->level;
+
+    playerController.setFootstepCallback(
+        [&level, &currentPlayer, &assets](const Hitbox& hitbox) {
+        const BlockMaterial* material = nullptr;
+        if (hitbox.groundMaterial.empty()) {
+            const auto& pos = hitbox.position;
+            const auto& half = hitbox.getHalfSize();
+
+            auto& blockIndices = level.content.getIndices()->blocks;
+            for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+                for (int offsetX = -1; offsetX <= 1; offsetX++) {
+                    int x = std::floor(pos.x + half.x * offsetX);
+                    int y = std::floor(pos.y - half.y * 1.1f);
+                    int z = std::floor(pos.z + half.z * offsetZ);
+                    auto vox = currentPlayer.chunks->get(x, y, z);
+                    if (vox) {
+                        auto& def = blockIndices.require(vox->id);
+                        if (!def.obstacle) {
+                            continue;
+                        }
+                        material = level.content.findBlockMaterial(def.material);
+                        break;
+                    }
+                }
+            }
+        } else {
+            material = level.content.findBlockMaterial(hitbox.groundMaterial);
+        }
+        if (material == nullptr) {
+            return;
+        }
+
+        auto sound = assets.get<audio::Sound>(material->stepsSound);
+        glm::vec3 pos {};
+        auto soundsCamera = currentPlayer.currentCamera.get();
+        if (currentPlayer.isCurrentCameraBuiltin()) {
+            soundsCamera = currentPlayer.fpCamera.get();
+        }
+        bool relative = soundsCamera == currentPlayer.fpCamera.get();
+        if (!relative) {
+            pos = currentPlayer.getPosition();
+        }
+        audio::play(
+            sound, 
+            pos, 
+            relative, 
+            0.333f, 
+            1.0f + (rand() % 6 - 3) * 0.05f, 
+            false,
+            audio::PRIORITY_LOW,
+            audio::get_channel_index("regular")
+        );
+    });
+
+    controller.getBlocksController()->listenBlockInteraction(
+        [&level, &assets]
+        (auto player, const auto& pos, const auto& def, BlockInteraction type) {
             auto material = level.content.findBlockMaterial(def.material);
             if (material == nullptr) {
                 return;
             }
 
-            if (type == BlockInteraction::step) {
-                auto sound = assets.get<audio::Sound>(material->stepsSound);
-                glm::vec3 pos {};
-                auto soundsCamera = currentPlayer->currentCamera.get();
-                if (soundsCamera == currentPlayer->spCamera.get() ||
-                    soundsCamera == currentPlayer->tpCamera.get()) {
-                    soundsCamera = currentPlayer->fpCamera.get();
-                }
-                bool relative = player == currentPlayer && 
-                    soundsCamera == currentPlayer->fpCamera.get();
-                if (!relative) {
-                    pos = player->getPosition();
-                }
-                audio::play(
-                    sound, 
-                    pos, 
-                    relative, 
-                    0.333f, 
-                    1.0f + (rand() % 6 - 3) * 0.05f, 
-                    false,
-                    audio::PRIORITY_LOW,
-                    audio::get_channel_index("regular")
-                );
-            } else {
+            if (type != BlockInteraction::step) {
                 audio::Sound* sound = nullptr;
                 switch (type) {
                     case BlockInteraction::placing:
@@ -95,14 +136,6 @@ Level& LevelFrontend::getLevel() {
     return level;
 }
 
-const Level& LevelFrontend::getLevel() const {
-    return level;
-}
-
-const Assets& LevelFrontend::getAssets() const {
-    return assets;
-}
-
 ContentGfxCache& LevelFrontend::getContentGfxCache() {
     return *contentCache;
 }
@@ -111,6 +144,10 @@ const ContentGfxCache& LevelFrontend::getContentGfxCache() const {
     return *contentCache;
 }
 
-LevelController* LevelFrontend::getController() const {
+LevelController& LevelFrontend::getController() const {
     return controller;
+}
+
+Weather& LevelFrontend::getWeather() {
+    return weather;
 }

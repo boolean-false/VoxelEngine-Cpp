@@ -26,12 +26,28 @@ namespace util {
             return last[0] == '-';
         }
 
+        bool isNextKeywordArg() const {
+            if (pos >= argc) {
+                throw std::runtime_error("unexpected end");
+            }
+            return argv[pos][0] == '-';
+        }
+
         std::string next() {
             if (pos >= argc) {
                 throw std::runtime_error("unexpected end");
             }
             last = argv[pos];
             return argv[pos++];
+        }
+
+        int nextInt() {
+            auto text = next();
+            try {
+                return std::stoi(text);
+            } catch (const std::exception& e) {
+                throw std::runtime_error(e.what());
+            }
         }
     };
 }

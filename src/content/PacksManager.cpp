@@ -1,13 +1,19 @@
+#define VC_ENABLE_REFLECTION
 #include "PacksManager.hpp"
 
 #include <queue>
 #include <sstream>
 
+#include "ContentPackVersion.hpp"
 #include "util/listutil.hpp"
 
 PacksManager::PacksManager() = default;
 
-void PacksManager::setSources(std::vector<std::pair<std::string, io::path>> sources) {
+const std::vector<io::path>& PacksManager::getSources() const {
+    return sources;
+}
+
+void PacksManager::setSources(std::vector<io::path> sources) {
     this->sources = std::move(sources);
 }
 
@@ -15,8 +21,8 @@ void PacksManager::scan() {
     packs.clear();
 
     std::vector<ContentPack> packsList;
-    for (auto& [path, folder] : sources) {
-        ContentPack::scanFolder(path, folder, packsList);
+    for (auto& folder : sources) {
+        ContentPack::scanFolder(folder, packsList);
         for (auto& pack : packsList) {
             packs.try_emplace(pack.id, pack);
         }
@@ -90,7 +96,7 @@ static bool resolve_dependencies(
         }
         auto found = packs.find(dep.id);
         bool exists = found != packs.end();
-        if (!exists && dep.level == DependencyLevel::required) {
+        if (!exists && dep.level == DependencyLevel::REQUIRED) {
             throw contentpack_error(
                 dep.id, io::path(), "dependency of '" + pack->id + "'"
             );
@@ -99,15 +105,34 @@ static bool resolve_dependencies(
             // ignored for optional or weak dependencies
             continue;
         }
-        if (resolveWeaks && dep.level == DependencyLevel::weak) {
+        if (resolveWeaks && dep.level == DependencyLevel::WEAK) {
             // dependency pack is found but not added yet
             // resolveWeaks is used on second iteration, so it's will not be
             // added
             continue;
         }
 
+        auto dep_pack = found->second;
+
+        if (Version::matchesPattern(dep.version) && Version::matchesPattern(dep_pack.version)
+            && Version(dep_pack.version)
+                .processOperator(dep.op, Version(dep.version))
+        ) {
+            // dependency pack version meets the required one
+        } else if (dep.version == "*" || dep.version == dep_pack.version){
+            // fallback: dependency pack version also meets required one
+        } else {
+            throw contentpack_error(
+                dep.id,
+                io::path(),
+                "does not meet required version '" +
+                    VersionOperatorMeta.getNameString(dep.op) + dep.version +
+                    "' of '" + pack->id + "'"
+            );
+        }
+
         if (!util::contains(allNames, dep.id) &&
-            dep.level != DependencyLevel::weak) {
+            dep.level != DependencyLevel::WEAK) {
             allNames.push_back(dep.id);
             queue.push(&found->second);
         }

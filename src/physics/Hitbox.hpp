@@ -1,13 +1,16 @@
 #pragma once
 
+#define GLM_ENABLE_EXPERIMENTAL
+
 #include "maths/aabb.hpp"
 #include "typedefs.hpp"
+#include "util/EnumMetadata.hpp"
 
 #include <set>
 #include <string>
-#include <optional>
 #include <functional>
 #include <glm/glm.hpp>
+#include <glm/gtx/norm.hpp>
 
 enum class SensorType {
     AABB,
@@ -41,23 +44,57 @@ enum class BodyType {
     STATIC, KINEMATIC, DYNAMIC
 };
 
-std::optional<BodyType> BodyType_from(std::string_view str);
-std::string to_string(BodyType type);
+VC_ENUM_METADATA(BodyType)
+    {"static", BodyType::STATIC},
+    {"kinematic", BodyType::KINEMATIC},
+    {"dynamic", BodyType::DYNAMIC},
+VC_ENUM_END
 
 struct Hitbox {
+    entityid_t entity;
     BodyType type;
     glm::vec3 position;
     glm::vec3 halfsize;
     glm::vec3 velocity;
-    float linearDamping;
-    bool verticalDamping = false;
+    glm::vec3 scale {1.0f, 1.0f, 1.0f};
+    float linearDamping = 0.5;
+    float verticalDamping = 1.0f;
     bool grounded = false;
     float gravityScale = 1.0f;
     bool crouching = false;
+    float stepHeight = 0.5f;
+    float mass = 1.0f;
+    float elasticity = 0.0f;
+    std::string material;
+    std::string groundMaterial;
+    glm::vec3 groundVelocity {};
+    
+    glm::vec3 prevPosition {};
+    glm::vec3 prevVelocity {};
+    bool prevGrounded = false;
 
-    Hitbox(BodyType type, glm::vec3 position, glm::vec3 halfsize);
+    static inline constexpr float TELEPORT_THRESOLD_SQR = 0.5f;
+
+    Hitbox(
+        entityid_t entity, BodyType type, glm::vec3 position, glm::vec3 halfsize
+    );
 
     AABB getAABB() const {
-        return AABB(position-halfsize, position+halfsize);
+        return AABB(position - halfsize, position + halfsize);
+    }
+
+    glm::vec3 getHalfSize() const {
+        return halfsize * scale;
+    }
+
+    void setPos(const glm::vec3& vec) {
+        position = vec;
+        if (glm::distance2(position, prevPosition) >= TELEPORT_THRESOLD_SQR) {
+            prevPosition = vec;
+        }
+    }
+
+    glm::vec3 getSurfaceVelocity() const {
+        return velocity - groundVelocity;
     }
 };

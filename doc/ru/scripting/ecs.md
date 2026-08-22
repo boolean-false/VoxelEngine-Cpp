@@ -26,9 +26,16 @@ entity:get_uid() -> int
 entity:get_component(name: str) -> компонент или nil
 -- Проверяет наличие компонента по имени
 entity:has_component(name: str) -> bool
+-- Запрашивает компонент по имени. Бросает исключение при отсутствии
+entity:require_component(name: str) -> компонент
 
 -- Включает/выключает компонент по имени
 entity:set_enabled(name: str, enable: bool)
+
+-- Возвращает id игрока, к которому привязана сущность, в ином же случае возвращает -1.
+-- Во время инициализации компонентов при спавне сущности так же возвращает -1,
+-- так как привязка происходит после инициализации. 
+entity:get_player() -> int или nil
 ```
 
 ## Встроенные компоненты
@@ -81,9 +88,9 @@ body:get_size() -> vec3
 body:set_size(size: vec3)
 
 -- Возвращает множитель гравитации
-body:get_gravity_scale() -> vec3
+body:get_gravity_scale() -> number
 -- Устанавливает множитель гравитации
-body:set_gravity_scale(scale: vec3)
+body:set_gravity_scale(scale: number)
 
 -- Возвращает множитель затухания линейной скорости (используется для имитации сопротивления воздуха и трения)
 body:get_linear_damping() -> number
@@ -92,8 +99,10 @@ body:set_linear_damping(value: number)
 
 -- Проверяет, включено ли вертикальное затухание скорости
 body:is_vdamping() -> bool
--- Включает/выключает вертикальное затухание скорости
-body:set_vdamping(enabled: bool)
+-- Возвращает множитель вертикального затухания скорости
+body:get_vdamping() -> number
+-- Включает/выключает вертикальное затухание скорости / устанавливает значение множителя
+body:set_vdamping(enabled: bool | number)
 
 -- Проверяет, находится ли сущность на земле (приземлена)
 body:is_grounded() -> bool
@@ -107,6 +116,24 @@ body:set_crouching(enabled: bool)
 body:get_body_type() -> str
 -- Устанавливает тип физического тела
 body:set_body_type(type: str)
+
+-- Возвращает материал тела (то же, что и у блоков)
+body:get_material() -> str
+-- Устанавливает материал тела
+body:set_material(material: str)
+
+-- Возвращает массу тела
+body:get_mass() -> number
+-- Устанавливает массу тела
+body:set_mass(mass: number)
+
+-- Возвращает упругость тела
+body:get_elasticity() -> number
+-- Устанавливает упругость тела
+body:set_elasticity(elasticity: number)
+
+-- Возвращает скорость поверхности, на которой находится тело, либо {0,0,0}
+body:get_ground_vel() -> vec3
 ```
 
 ### Skeleton
@@ -153,6 +180,21 @@ rig:get_color() -> vec3
 rig:set_color(color: vec3)
 ```
 
+## Пользовательские компоненты
+
+Компонент описывается в виде скрипта `{пак}/scripts/components/{имя}.lua`.
+Компонент будет доступен для использования в описании сущности как `{пак}:{имя}`.
+Пример: `core:scripts/components/pathfinding.lua` -> `core:pathfinding`.
+
+Для **каждой** сущности, содержащей компонент, создаётся **отдельный экземпляр** со **своим пространством имен** внутри пространства имён пака.
+Глобальные переменные, объявляемые в нём, играют роль публичных полей компонента (как и глобальные функции).
+
+Компоненты сущности указываются через [список "components"](../entity-properties.md#cписок-компонентов---components)
+
+> [!WARNING]
+> При выходе сущности за пределы зоны прогрузки она удаляется, вызывая события.
+> При повторном попадании в зону прогрузки сущность спавнится заново.
+
 ## События компонента
 
 ```lua
@@ -184,6 +226,12 @@ function on_update(tps: int)
 ```
 
 Вызывается каждый такт сущностей (на данный момент - 20 раз в секунду).
+
+```lua
+function on_physics_update(delta: number)
+```
+
+Вызывается после каждого шага физики
 
 ```lua
 function on_render(delta: number)
@@ -228,3 +276,8 @@ function on_used(playerid: int)
 
 Вызывается при использовании сущности (ПКМ по сущности). ID игрока передается в качестве аргумента.
 
+```lua
+function on_player_set(playerid: int)
+```
+
+Вызывается при прикреплении сущности к игроку.

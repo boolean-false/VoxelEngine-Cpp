@@ -6,8 +6,8 @@
 #include <memory>
 
 enum class ImageFormat {
-    rgb888,
-    rgba8888
+    RGB888,
+    RGBA8888
 };
 
 class ImageData {
@@ -28,9 +28,17 @@ public:
     void flipY();
 
     void drawLine(int x1, int y1, int x2, int y2, const glm::ivec4& color);
+    void drawRect(int x, int y, int width, int height, const glm::ivec4& color);
     void blit(const ImageData& image, int x, int y);
     void extrude(int x, int y, int w, int h);
     void fixAlphaColor();
+    void mulColor(const glm::ivec4& color);
+    void mulColor(const ImageData& other);
+    void addColor(const glm::ivec4& color, int multiplier);
+    void addColor(const ImageData& other, int multiplier);
+    void extend(int newWidth, int newHeight);
+
+    std::unique_ptr<ImageData> cropped(int x, int y, int width, int height) const;
 
     ubyte* getData() const {
         return data.get();
@@ -49,7 +57,7 @@ public:
     }
 
     size_t getDataSize() const {
-        size_t channels = 3 + (format == ImageFormat::rgba8888);
+        size_t channels = 3 + (format == ImageFormat::RGBA8888);
         return width * height * channels;
     }
 };

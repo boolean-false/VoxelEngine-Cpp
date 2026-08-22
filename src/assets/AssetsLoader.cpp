@@ -1,31 +1,33 @@
 #include "AssetsLoader.hpp"
 
-#include <iostream>
-#include <memory>
-#include <utility>
-
+#include "assetload_funcs.hpp"
+#include "Assets.hpp"
+#include "coders/commons.hpp"
 #include "coders/imageio.hpp"
 #include "constants.hpp"
 #include "content/Content.hpp"
 #include "content/ContentPack.hpp"
 #include "debug/Logger.hpp"
-#include "io/engine_paths.hpp"
-#include "io/io.hpp"
+#include "engine/Engine.hpp"
+#include "engine/EnginePaths.hpp"
 #include "graphics/core/Texture.hpp"
+#include "io/io.hpp"
+#include "items/ItemDef.hpp"
 #include "logic/scripting/scripting.hpp"
+#include "objects/EntityDef.hpp"
 #include "objects/rigging.hpp"
 #include "util/ThreadPool.hpp"
 #include "voxels/Block.hpp"
-#include "items/ItemDef.hpp"
-#include "Assets.hpp"
-#include "assetload_funcs.hpp"
+
+#include <memory>
+#include <utility>
 
 namespace fs = std::filesystem;
 
 static debug::Logger logger("assets-loader");
 
-AssetsLoader::AssetsLoader(Assets* assets, const ResPaths* paths)
-    : assets(assets), paths(paths) {
+AssetsLoader::AssetsLoader(Engine& engine, Assets& assets, const ResPaths& paths)
+    : engine(engine), assets(assets), paths(paths) {
     addLoader(AssetType::SHADER, assetload::shader);
     addLoader(AssetType::TEXTURE, assetload::texture);
     addLoader(AssetType::FONT, assetload::font);
@@ -33,6 +35,8 @@ AssetsLoader::AssetsLoader(Assets* assets, const ResPaths* paths)
     addLoader(AssetType::LAYOUT, assetload::layout);
     addLoader(AssetType::SOUND, assetload::sound);
     addLoader(AssetType::MODEL, assetload::model);
+    addLoader(AssetType::POST_EFFECT, assetload::posteffect);
+    addLoader(AssetType::SKELETON, assetload::skeleton);
 }
 
 void AssetsLoader::addLoader(AssetType tag, aloader_func func) {
@@ -43,9 +47,10 @@ void AssetsLoader::add(
     AssetType tag,
     const std::string& filename,
     const std::string& alias,
-    std::shared_ptr<AssetCfg> settings
+    std::shared_ptr<AssetCfg> settings,
+    bool overwrite
 ) {
-    if (enqueued.find({tag, alias}) != enqueued.end()){
+    if (!overwrite && enqueued.find({tag, alias}) != enqueued.end()){
         return;
     }
     entries.push(aloader_entry {tag, filename, alias, std::move(settings)});
@@ -69,20 +74,26 @@ aloader_func AssetsLoader::getLoader(AssetType tag) {
 void AssetsLoader::loadNext() {
     const aloader_entry& entry = entries.front();
     logger.info() << "loading " << entry.filename << " as " << entry.alias;
+
+    std::string error {};
     try {
         aloader_func loader = getLoader(entry.tag);
         auto postfunc =
             loader(this, paths, entry.filename, entry.alias, entry.config);
-        postfunc(assets);
-        entries.pop();
-    } catch (std::runtime_error& err) {
-        logger.error() << err.what();
-        auto type = entry.tag;
-        std::string filename = entry.filename;
-        std::string reason = err.what();
-        entries.pop();
-        throw assetload::error(type, std::move(filename), std::move(reason));
+        postfunc(&assets);
+    } catch (const parsing_error& err) {
+        error = err.errorLog();
+    } catch (const std::runtime_error& err) {
+        error = err.what();
     }
+    if (!error.empty()) {
+        logger.error() << error;
+        auto tag = entry.tag;
+        auto filename = entry.filename;
+        entries.pop();
+        throw assetload::error(tag, std::move(filename), std::move(error));
+    }
+    entries.pop();
 }
 
 static void add_layouts(
@@ -101,7 +112,7 @@ static void add_layouts(
             AssetType::LAYOUT,
             file.string(),
             name,
-            std::make_shared<LayoutCfg>(env)
+            std::make_shared<LayoutCfg>(&loader.getEngine().getGUI(), env)
         );
     }
 }
@@ -130,6 +141,10 @@ static std::string assets_def_folder(AssetType tag) {
             return SOUNDS_FOLDER;
         case AssetType::MODEL:
             return MODELS_FOLDER;
+        case AssetType::POST_EFFECT:
+            return POST_EFFECTS_FOLDER;
+        case AssetType::SKELETON:
+            return SKELETONS_FOLDER;
     }
     return "<error>";
 }
@@ -140,17 +155,16 @@ void AssetsLoader::processPreload(
     std::string defFolder = assets_def_folder(tag);
     std::string path = defFolder + "/" + name;
     if (map == nullptr) {
-        add(tag, path, name);
+        add(tag, path, name, nullptr, true);
         return;
     }
+    std::shared_ptr<AssetCfg> config = nullptr;
     map.at("path").get(path);
+    logger.debug() << "processing preload " << util::quote(name) << " path: " << util::quote(path);
     switch (tag) {
         case AssetType::SOUND: {
             bool keepPCM = false;
-            add(tag,
-                path,
-                name,
-                std::make_shared<SoundCfg>(map.at("keep-pcm").get(keepPCM)));
+            config = std::make_shared<SoundCfg>(map.at("keep-pcm").get(keepPCM));
             break;
         }
         case AssetType::ATLAS: {
@@ -160,13 +174,31 @@ void AssetsLoader::processPreload(
             if (typeName == "separate") {
                 type = AtlasType::SEPARATE;
             }
-            add(tag, path, name, std::make_shared<AtlasCfg>(type));
+            config = std::make_shared<AtlasCfg>(type);
+            break;
+        }
+        case AssetType::POST_EFFECT: {
+            bool advanced = false;
+            map.at("advanced").get(advanced);
+            config = std::make_shared<PostEffectCfg>(advanced);
+            break;
+        }
+        case AssetType::MODEL: {
+            bool squashed = false;
+            map.at("squash").get(squashed);
+            config = std::make_shared<ModelCfg>(squashed);
+            break;
+        }
+        case AssetType::FONT: {
+            int size = DEFAULT_FONT_SIZE;
+            map.at("size").get(size);
+            config = std::make_unique<FontCfg>(size);
             break;
         }
         default:
-            add(tag, path, name);
             break;
     }
+    add(tag, path, name, std::move(config), true);
 }
 
 void AssetsLoader::processPreloadList(AssetType tag, const dv::value& list) {
@@ -195,11 +227,13 @@ void AssetsLoader::processPreloadConfig(const io::path& file) {
     processPreloadList(AssetType::TEXTURE, root["textures"]);
     processPreloadList(AssetType::SOUND, root["sounds"]);
     processPreloadList(AssetType::MODEL, root["models"]);
+    processPreloadList(AssetType::POST_EFFECT, root["post-effects"]);
+    processPreloadList(AssetType::SKELETON, root["skeletons"]);
     // layouts are loaded automatically
 }
 
 void AssetsLoader::processPreloadConfigs(const Content* content) {
-    auto preloadFile = paths->getMainRoot() / "preload.json";
+    io::path preloadFile = "res:preload.json";
     if (io::exists(preloadFile)) {
         processPreloadConfig(preloadFile);
     }
@@ -211,10 +245,21 @@ void AssetsLoader::processPreloadConfigs(const Content* content) {
             continue;
         }
         const auto& pack = entry.second;
-        auto preloadFile = pack->getInfo().folder / "preload.json";
+        preloadFile = pack->getInfo().folder / "preload.json";
         if (io::exists(preloadFile)) {
             processPreloadConfig(preloadFile);
         }
+    }
+}
+
+static void add_variant(AssetsLoader& loader, const Variant& variant) {
+    if (!variant.model.name.empty() &&
+        variant.model.name.find(':') == std::string::npos) {
+        loader.add(
+            AssetType::MODEL,
+            MODELS_FOLDER + "/" + variant.model.name,
+            variant.model.name
+        );
     }
 }
 
@@ -236,29 +281,27 @@ void AssetsLoader::addDefaults(AssetsLoader& loader, const Content* content) {
             add_layouts(pack->getEnvironment(), info.id, folder, loader);
         }
 
-        for (auto& entry : content->getSkeletons()) {
-            auto& skeleton = *entry.second;
-            for (auto& bone : skeleton.getBones()) {
-                std::string model = bone->model.name;
-                size_t pos = model.rfind('.');
-                if (pos != std::string::npos) {
-                    model = model.substr(0, pos);
-                }
-                if (!model.empty()) {
-                    loader.add(
-                        AssetType::MODEL, MODELS_FOLDER + "/" + model, model
-                    );
-                }
+        for (const auto& entry : content->getPacks()) {
+            io::path skeletonsDir = entry.first + ":skeletons";
+            if (!io::is_directory(skeletonsDir)) {
+                continue;
+            }
+            for (const auto& file : io::directory_iterator(skeletonsDir)) {
+                loader.add(
+                    AssetType::SKELETON,
+                    (file.parent() / file.stem()).string(),
+                    entry.first + ":" + file.stem()
+                );
             }
         }
+
         for (const auto& [_, def] : content->blocks.getDefs()) {
-            if (!def->modelName.empty() &&
-                def->modelName.find(':') == std::string::npos) {
-                loader.add(
-                    AssetType::MODEL,
-                    MODELS_FOLDER + "/" + def->modelName,
-                    def->modelName
-                );
+            if (def->variants) {
+                for (const auto& variant : def->variants->variants) {
+                    add_variant(loader, variant);
+                }
+            } else {
+                add_variant(loader, def->defaults);
             }
         }
         for (const auto& [_, def] : content->items.getDefs()) {
@@ -270,33 +313,50 @@ void AssetsLoader::addDefaults(AssetsLoader& loader, const Content* content) {
                 );
             }
         }
+        for (const auto& [_, def] : content->entities.getDefs()) {
+            if (def->skeletonName.find(':') == std::string::npos) {
+                // expecting a VCM with skeleton
+                loader.add(
+                    AssetType::MODEL,
+                    MODELS_FOLDER + "/" + def->skeletonName,
+                    def->skeletonName
+                );
+            }
+        }
     }
 }
 
 bool AssetsLoader::loadExternalTexture(
-    Assets* assets,
+    AssetsLoader& loader,
     const std::string& name,
     const std::vector<io::path>& alternatives
 ) {
-    if (assets->get<Texture>(name) != nullptr) {
+    if (loader.getAssets().get<Texture>(name) != nullptr) {
         return true;
     }
     for (auto& path : alternatives) {
         if (io::exists(path)) {
-            try {
-                auto image = imageio::read(path);
-                assets->store(Texture::from(image.get()), name);
-                return true;
-            } catch (const std::exception& err) {
-                logger.error() << "error while loading external "
-                               << path.string() << ": " << err.what();
-            }
+            loader.add(
+                AssetType::TEXTURE,
+                (path.parent() / path.stem()).string(),
+                name,
+                nullptr
+            );
+            return true;
         }
     }
     return false;
 }
 
-const ResPaths* AssetsLoader::getPaths() const {
+Assets& AssetsLoader::getAssets() {
+    return assets;
+}
+
+Engine& AssetsLoader::getEngine() {
+    return engine;
+}
+
+const ResPaths& AssetsLoader::getPaths() const {
     return paths;
 }
 
@@ -319,14 +379,24 @@ public:
     }
 };
 
-std::shared_ptr<Task> AssetsLoader::startTask(runnable onDone) {
+std::shared_ptr<Task> AssetsLoader::startTask(runnable onDone, int maxWorkers) {
     auto pool =
         std::make_shared<util::ThreadPool<aloader_entry, assetload::postfunc>>(
             "assets-loader-pool",
-            [=]() { return std::make_shared<LoaderWorker>(this); },
-            [=](const assetload::postfunc& func) { func(assets); }
+            [=]() { return std::make_unique<LoaderWorker>(this); },
+            [this](const assetload::postfunc& func) { func(&assets); },
+            maxWorkers
         );
     pool->setOnComplete(std::move(onDone));
+    pool->setJobsSource([this]() -> std::optional<aloader_entry> {
+        if (entries.empty()) {
+            return std::nullopt;
+        }
+        aloader_entry entry = std::move(entries.front());
+        entries.pop();
+        return entry;
+    });
+
     while (!entries.empty()) {
         aloader_entry entry = std::move(entries.front());
         entries.pop();

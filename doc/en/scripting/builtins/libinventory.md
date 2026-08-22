@@ -97,6 +97,40 @@ inventory.set(...)
 inventory.set_all_data(...)
 ```
 for moving is inefficient, use inventory.move or inventory.move_range.
+```lua
+-- Get item caption
+inventory.get_caption(
+    -- id of inventory
+    invid: int,
+    -- slot id
+    slot: int
+)
+-- Set item caption
+inventory.set_caption(
+    -- id of inventory
+    invid: int,
+    -- slot id
+    slot: int,
+    -- Item Caption
+    caption: string
+)
+-- Get item description
+inventory.get_description(
+    -- id of inventory
+    invid: int,
+    -- slot id
+    slot: int
+)
+-- Set item description
+inventory.set_description(
+    -- id of inventory
+    invid: int,
+    -- slot id
+    slot: int,
+    -- Item Description
+    description: string
+)
+```
 
 ```lua
 -- Returns a copy of value of a local property of an item by name or nil.
@@ -128,7 +162,19 @@ inventory.get_all_data(
     invid: int,
     -- slot index
     slot: int,
-) -> table
+) -> table | nil
+
+-- Sets the values ​​of all local item properties.
+inventory.set_all_data(
+    -- inventory id
+    invid: int,
+    -- slot index
+    slot: int,
+    -- property:value table
+    fields: table,
+    -- clear other property values
+    [optional] clear: boolean = false
+)
 ```
 
 ```lua
@@ -156,7 +202,7 @@ inventory.move(
     [optional] rangeEnd: int
 )
 
--- Decreases the item count in the slot by 1.
+-- Decreases the item count in the slot by specified number.
 inventory.decrement(
     -- inventory id
     invid: int,

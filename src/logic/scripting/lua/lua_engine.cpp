@@ -4,15 +4,24 @@
 #include <iostream>
 
 #include "io/io.hpp"
-#include "io/engine_paths.hpp"
+#include "engine/EnginePaths.hpp"
 #include "debug/Logger.hpp"
 #include "util/stringutil.hpp"
 #include "libs/api_lua.hpp"
-#include "lua_custom_types.hpp"
+#include "usertypes/lua_type_heightmap.hpp"
+#include "usertypes/lua_type_voxelfragment.hpp"
+#include "usertypes/lua_type_canvas.hpp"
+#include "usertypes/lua_type_random.hpp"
+#include "usertypes/lua_type_pcmstream.hpp"
 #include "engine/Engine.hpp"
 
-static debug::Logger logger("lua-state");
-static lua::State* main_thread = nullptr;
+namespace {
+    debug::Logger logger("lua-state");
+    lua::State* main_thread = nullptr;
+    bool headless_mode = false;
+    bool test_mode = false;
+    const std::unordered_map<std::string, std::string>* project_args;
+}
 
 using namespace lua;
 
@@ -51,18 +60,31 @@ static void create_libs(State* L, StateType stateType) {
     openlib(L, "mat4", mat4lib);
     openlib(L, "pack", packlib);
     openlib(L, "quat", quatlib);
+    openlib(L, "random", randomlib);
+    openlib(L, "compression", compressionlib);
     openlib(L, "toml", tomllib);
     openlib(L, "utf8", utf8lib);
     openlib(L, "vec2", vec2lib);
     openlib(L, "vec3", vec3lib);
     openlib(L, "vec4", vec4lib);
+    openlib(L, "xml", xmllib);
+    openlib(L, "yaml", yamllib);
+
+    openlib(L, "__vc_app", applib);
+    getglobal(L, "__vc_app");
+    setregistry(L, "app");
+
+    createtable(L, 0, 0);
+    pushvalue(L, -1);
+    setglobal(L, "__vc_internals");
+    setregistry(L, "internals");
 
     if (stateType == StateType::SCRIPT) {
-        openlib(L, "app", applib);
-    } else if (stateType == StateType::BASE) {
-        openlib(L, "__vc_app", applib);
+        getregistry(L, "app");
+        setglobal(L, "app");
     }
     if (stateType == StateType::BASE || stateType == StateType::SCRIPT) {
+        openlib(L, "assets", assetslib);
         openlib(L, "audio", audiolib);
         openlib(L, "console", consolelib);
         openlib(L, "core", corelib);
@@ -70,6 +92,7 @@ static void create_libs(State* L, StateType stateType) {
         openlib(L, "input", inputlib);
         openlib(L, "inventory", inventorylib);
         openlib(L, "network", networklib);
+        openlib(L, "pathfinding", pathfindinglib);
         openlib(L, "player", playerlib);
         openlib(L, "time", timelib);
         openlib(L, "world", worldlib);
@@ -83,11 +106,23 @@ static void create_libs(State* L, StateType stateType) {
         openlib(L, "__transform", transformlib);
     }
 
+    if (::test_mode) {
+        openlib(L, "test", testlib);
+    }
+
     addfunc(L, "print", lua::wrap<l_print>);
-    addfunc(L, "_crc32", lua::wrap<l_crc32>);
+    addfunc(L, "crc32", lua::wrap<l_crc32>);
+}
+
+static int l_panic_handler(lua::State* L) {
+    logger.error() << "PANIC: unprotected error in call to Lua API: " << lua::tostring(L, -1);
+    logger.flush();
+    abort();
 }
 
 void lua::init_state(State* L, StateType stateType) {
+    lua_atpanic(L, l_panic_handler);
+
     // Allowed standard libraries
     luaL_openlibs(L);
 
@@ -100,32 +135,75 @@ void lua::init_state(State* L, StateType stateType) {
     pushnil(L);
     setglobal(L, "io");
 
+    createtable(L, 0, 0);
+    pushvalue(L, -1);
+    setglobal(L, "__vc__pack_envs");
+    setregistry(L, lua::PACK_ENVS_TABLE);
+
     const char* removed_os[] {
         "execute", "exit", "remove", "rename", "setlocale", "tmpname", nullptr};
     remove_lib_funcs(L, "os", removed_os);
     create_libs(L, stateType);
 
+    createtable(L, 0, 0);
+    setregistry(L, LAMBDAS_TABLE);
+
+    createtable(L, 0, 0);
+    setregistry(L, CHUNKS_TABLE);
+
+    createtable(L, 0, 0);
     pushglobals(L);
-    setglobal(L, env_name(0));
-
-    createtable(L, 0, 0);
-    setglobal(L, LAMBDAS_TABLE);
-
-    createtable(L, 0, 0);
-    setglobal(L, CHUNKS_TABLE);
+    setfield(L, env_name(0));
+    setregistry(L, ENVS_TABLE);
 
     initialize_libs_extends(L);
 
-    newusertype<LuaBytearray>(L);
     newusertype<LuaHeightmap>(L);
     newusertype<LuaVoxelFragment>(L);
     newusertype<LuaCanvas>(L);
+
+    pushboolean(L, headless_mode);
+    setglobal(L, "__VC_HEADLESS");
+
+    createtable(L, 0, project_args->size());
+    for (const auto& [key, value] : *project_args) {
+        pushstring(L, value);
+        setfield(L, key);
+    }
+    setglobal(L, "__VC_PROJECT_ARGS");
+
+    auto file = "res:scripts/stdmin.lua";
+    auto src = io::read_string(file);
+    lua::pop(L, lua::execute(L, 0, src, "core:scripts/stdmin.lua"));
+
+    newusertype<LuaRandom>(L);
+    if (getglobal(L, "random")) {
+        if (getglobal(L, "__vc_Random")) {
+            setfield(L, "Random");
+        }
+        pop(L);
+    }
+    newusertype<LuaPCMStream>(L);
+    if (getglobal(L, "audio")) {
+        if (getglobal(L, "__vc_PCMStream")) {
+            setfield(L, "PCMStream");
+        }
+        pop(L);
+    }
+
+    if (stateType == StateType::GENERATOR) {
+        pushnil(L);
+        setglobal(L, "ffi");
+    }
 }
 
 void lua::initialize(const EnginePaths& paths, const CoreParameters& params) {
     logger.info() << LUA_VERSION;
     logger.info() << LUAJIT_VERSION;
 
+    headless_mode = params.headless;
+    test_mode = params.testMode;
+    project_args = &params.projectArgs;
     main_thread = create_state(
         paths, params.headless ? StateType::SCRIPT : StateType::BASE
     );
@@ -162,9 +240,5 @@ State* lua::create_state(const EnginePaths& paths, StateType stateType) {
         throw luaerror("could not initialize Lua state");
     }
     init_state(L, stateType);
-    
-    auto file = "res:scripts/stdmin.lua";
-    auto src = io::read_string(file);
-    lua::pop(L, lua::execute(L, 0, src, "core:scripts/stdmin.lua"));
     return L;
 }

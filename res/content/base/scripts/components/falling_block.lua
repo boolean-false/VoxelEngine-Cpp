@@ -1,6 +1,5 @@
 local tsf = entity.transform
 local body = entity.rigidbody
-local rig = entity.skeleton
 
 local blockid = ARGS.block
 local blockstates = ARGS.states or 0
@@ -12,7 +11,8 @@ else
     SAVED_DATA.states = blockstates
 end
 
-do -- setup visuals
+if vc.is_client() then-- setup visuals
+    local rig = entity.skeleton
     local id = block.index(blockid)
     local rotation = block.decompose_state(blockstates)[1]
     local textures = block.get_textures(id)
@@ -29,6 +29,7 @@ do -- setup visuals
         0, 0, 0, 1
     }
     rig:set_matrix(0, matrix)
+    body:set_material(block.material(id))
 end
 
 function on_grounded()

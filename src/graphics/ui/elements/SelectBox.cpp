@@ -1,0 +1,113 @@
+#include "SelectBox.hpp"
+
+#include "Label.hpp"
+#include "assets/Assets.hpp"
+#include "graphics/ui/GUI.hpp"
+#include "graphics/ui/elements/Panel.hpp"
+#include "graphics/core/Batch2D.hpp"
+#include "graphics/core/DrawContext.hpp"
+
+using namespace gui;
+
+SelectBox::SelectBox(
+    GUI& gui,
+    std::vector<Option>&& options,
+    Option selected,
+    Mode mode,
+    int contentWidth,
+    const glm::vec4& padding
+)
+    : Button(gui, selected.text, padding, nullptr, glm::vec2(-1, -1)),
+      options(std::move(options)), mode(mode) {
+    listenAction(UIAction::CLICK, [this, contentWidth](GUI& gui) {
+        auto panel = std::make_shared<Panel>(
+            gui,
+            getMode() == Mode::BUTTON ? glm::vec2 {contentWidth, contentWidth}
+                                      : getSize(),
+            glm::vec4 {2.0f},
+            0.0f
+        );
+        panel->setColor({});
+        panel->setPadding(glm::vec4(0, size.y, 0, 0));
+        panel->setPos(calcPos() + glm::vec2(0, 0));
+        for (const auto& option : this->options) {
+            auto button = std::make_shared<Button>(
+                gui, option.text, glm::vec4(10.0f), nullptr, glm::vec2(-1.0f)
+            );
+            button->listenAction(UIAction::FOCUS, [this, option](GUI& gui) {
+                setSelected(option);
+                changeCallbacks.notify(gui, option.value);
+            });
+            panel->add(button);
+        }
+        panel->setZIndex(GUI::CONTEXT_MENU_ZINDEX);
+        gui.setFocus(panel);
+        panel->listenAction(UIAction::DEFOCUS, [panel=panel.get()](GUI& gui) {
+            gui.remove(panel);
+        });
+        panel->listenAction(UIAction::CLICK, [panel=panel.get()](GUI& gui) {
+            gui.remove(panel);
+        });
+        gui.add(panel);
+    });
+}
+
+void SelectBox::listenChange(OnStringChange&& callback) {
+    changeCallbacks.listen(std::move(callback));
+}
+
+void SelectBox::setSelected(const Option& selected) {
+    this->selected = selected;
+    if (mode == Mode::SELECT) {
+        this->label->setText(selected.text);
+    }
+}
+
+const SelectBox::Option& SelectBox::getSelected() const {
+    return selected;
+}
+
+const std::vector<SelectBox::Option>& SelectBox::getOptions() const {
+    return options;
+}
+
+void SelectBox::setOptions(std::vector<Option>&& options) {
+    this->options = std::move(options);
+}
+
+SelectBox::Mode SelectBox::getMode() const {
+    return mode;
+}
+
+void SelectBox::setMode(SelectBox::Mode mode) {
+    this->mode = mode;
+}
+
+void SelectBox::drawBackground(const DrawContext& pctx, const Assets&) {
+    glm::vec2 pos = calcPos();
+    auto batch = pctx.getBatch2D();
+    batch->untexture();
+    batch->setColor(calcColor());
+    batch->rect(pos.x, pos.y, size.x, size.y);
+    batch->setColor({1.0f, 1.0f, 1.0f, 0.333f});
+    
+    if (mode != Mode::SELECT) {
+        return;
+    }
+
+    int paddingRight = padding.w;
+    int widthHalf = 8;
+    int heightHalf = 4;
+    batch->triangle(
+        pos.x + size.x - paddingRight - widthHalf * 2,
+        pos.y + size.y / 2.0f - heightHalf,
+        pos.x + size.x - paddingRight,
+        pos.y + size.y / 2.0f - heightHalf,
+        pos.x + size.x - paddingRight - widthHalf,
+        pos.y + size.y / 2.0f + heightHalf
+    );
+}
+
+std::shared_ptr<Label> SelectBox::getLabel() const {
+    return label;
+}

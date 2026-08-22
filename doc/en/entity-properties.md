@@ -20,6 +20,22 @@ Example:
 ]
 ```
 
+You can pass values ​​in ARGS from the entity configuration.
+They will be passed both when creating a new entity and when loading a saved one.
+The `args` list is used for this:
+
+```json
+"components": [
+    {
+        "name": "base:drop",
+        "args": {
+            "item": "base:stone.item",
+            "count": 1
+        }
+    }
+]
+```
+
 The components code should be in `scripts/components`.
 
 ## Physics
@@ -45,11 +61,15 @@ Determines how the physics engine will work with it.
 
 ### *blocking*
 
-Determines whether the entity blocks installation of blocks.
+If true - the entity blocks the placement of a block that intersects with the entity's hitbox.
 
 *In the future will also block other entities movement.*
 
 Default value: *true*.
+
+### *selectable*
+
+If set to `false` the cursor will ignore the entity, passing the ray.
 
 ### *sensors*
 
@@ -78,6 +98,27 @@ Example:
 
 0. A rectangular area with a width, height and length of 0.4 m, centered at 0.0.
 1. Radial area with a radius of 1.6 m.
+
+### *solid*
+
+Makes the entity's hitbox an obstacle. When enabling this property for `dynamic` body, a mass must be specified.
+
+### *mass*
+
+Defines the entity's mass. Kilograms are used as the default.
+For `kinematic` bodies, an infinite mass is used instead.
+
+### *elasticity*
+
+Defines the entity's elasticity (affects the bounce on collision).
+
+### *step-height*
+
+Defines the maximum height of an obstacle an entity can step onto without jumping.
+
+### *material*
+
+Defines the entity's material (same as for blocks).
 
 ## View
 

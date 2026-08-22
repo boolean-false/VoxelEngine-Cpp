@@ -1,12 +1,14 @@
 #pragma once
 
-#include <stdexcept>
-#include <string>
-#include <vector>
-
 #include "typedefs.hpp"
 #include "content_fwd.hpp"
 #include "io/io.hpp"
+#include "util/EnumMetadata.hpp"
+
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include <optional>
 
 class EnginePaths;
 
@@ -19,21 +21,46 @@ public:
         io::path folder,
         const std::string& message
     );
-
+    
     std::string getPackId() const;
     io::path getFolder() const;
 };
 
+enum class VersionOperator {
+    EQUAL, GREATER, LESS,
+    GREATER_OR_EQUAL, LESS_OR_EQUAL
+};
+
+VC_ENUM_METADATA(VersionOperator)
+    {"=", VersionOperator::EQUAL},
+    {">", VersionOperator::GREATER},
+    {"<", VersionOperator::LESS},
+    {">=", VersionOperator::GREATER_OR_EQUAL},
+    {"<=", VersionOperator::LESS_OR_EQUAL},
+VC_ENUM_END
+
 enum class DependencyLevel {
-    required,  // dependency must be installed
-    optional,  // dependency will be installed if found
-    weak,      // only affects packs order
+    REQUIRED,  // dependency must be installed
+    OPTIONAL,  // dependency will be installed if found
+    WEAK,      // only affects packs order
 };
 
 /// @brief Content-pack that should be installed earlier the dependent
 struct DependencyPack {
     DependencyLevel level;
     std::string id;
+    std::string version;
+    VersionOperator op;
+};
+
+struct ContentPackStats {
+    size_t totalBlocks;
+    size_t totalItems;
+    size_t totalEntities;
+
+    inline bool hasSavingContent() const {
+        return totalBlocks + totalItems + totalEntities > 0;
+    }
 };
 
 struct ContentPack {
@@ -43,11 +70,12 @@ struct ContentPack {
     std::string creator = "";
     std::string description = "no description";
     io::path folder;
-    std::string path;
     std::vector<DependencyPack> dependencies;
     std::string source = "";
 
     io::path getContentFile() const;
+
+    std::optional<ContentPackStats> loadStats() const;
 
     static inline const std::string PACKAGE_FILENAME = "package.json";
     static inline const std::string CONTENT_FILENAME = "content.json";
@@ -57,15 +85,10 @@ struct ContentPack {
     static inline const io::path GENERATORS_FOLDER = "generators";
     static const std::vector<std::string> RESERVED_NAMES;
 
-    static bool is_pack(const io::path& folder);
-    static ContentPack read(
-        const std::string& path, const io::path& folder
-    );
+    static ContentPack read(const io::path& folder);
 
     static void scanFolder(
-        const std::string& path,
-        const io::path& folder,
-        std::vector<ContentPack>& packs
+        const io::path& folder, std::vector<ContentPack>& packs
     );
 
     static std::vector<std::string> worldPacksList(
@@ -78,7 +101,7 @@ struct ContentPack {
         const std::string& name
     );
 
-    static ContentPack createCore(const EnginePaths&);
+    static ContentPack createCore();
 
     static inline io::path getFolderFor(ContentType type) {
         switch (type) {
@@ -90,15 +113,13 @@ struct ContentPack {
             default: return "";
         }
     }
-};
 
-struct ContentPackStats {
-    size_t totalBlocks;
-    size_t totalItems;
-    size_t totalEntities;
-
-    inline bool hasSavingContent() const {
-        return totalBlocks + totalItems + totalEntities > 0;
+    static std::string_view getPrefix(std::string_view path) {
+        size_t pos = path.find(':');
+        if (pos == std::string::npos) {
+            return "";
+        }
+        return path.substr(0, pos);
     }
 };
 
@@ -113,6 +134,8 @@ struct WorldFuncsSet {
     bool onchunkremove;
     bool oninventoryopen;
     bool oninventoryclosed;
+    bool onentityspawn;
+    bool onentitydespawn;
 };
 
 class ContentPackRuntime {

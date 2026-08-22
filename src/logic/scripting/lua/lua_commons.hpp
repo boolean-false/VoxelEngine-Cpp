@@ -17,6 +17,11 @@
 #error LuaJIT required
 #endif
 
+#ifndef LUA_TCDATA
+// unsafe, use for filtering only
+#define LUA_TCDATA 10
+#endif
+
 namespace lua {
     class luaerror : public std::runtime_error {
     public:
@@ -48,4 +53,9 @@ namespace lua {
 
     void log_error(const std::string& text);
 
+    class Userdata {
+    public:
+        virtual ~Userdata() {};
+        virtual const std::string& getTypeName() const = 0;
+    };
 }

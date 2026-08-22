@@ -29,6 +29,7 @@ namespace xml {
         glm::vec3 asVec3() const;
         glm::vec4 asVec4() const;
         glm::vec4 asColor() const;
+        int asNumbers(float* dst, size_t dstSize) const;
     };
 
     /// @brief XML element class. Text element has tag 'text' and attribute
@@ -53,11 +54,11 @@ namespace xml {
         /// @brief Get element tag
         const std::string& getTag() const;
 
-        inline bool isText() const {
+        bool isText() const {
             return getTag() == "#";
         }
 
-        inline const std::string& text() const {
+        const std::string& getInnerText() const {
             return attr("#").getText();
         }
 
@@ -118,12 +119,22 @@ namespace xml {
         const std::string& indentStr = "    "
     );
 
+    std::string stringify(
+        const Node& element,
+        bool nice = true,
+        const std::string& indentStr = "    "
+    );
+
     /// @brief Read XML Document from string
     /// @param filename file name will be shown in error messages
     /// @param source xml source code string
     /// @return xml document
     std::unique_ptr<Document> parse(
         std::string_view filename, std::string_view source
+    );
+
+    std::unique_ptr<Document> parse_vcm(
+        std::string_view filename, std::string_view source, std::string_view tag
     );
 
     using xmlelement = Node;

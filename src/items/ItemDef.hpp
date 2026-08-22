@@ -2,6 +2,8 @@
 
 #include <glm/glm.hpp>
 #include <string>
+#include <vector>
+#include <set>
 
 #include "data/dv.hpp"
 #include "typedefs.hpp"
@@ -11,6 +13,9 @@ struct ItemFuncsSet {
     bool on_use : 1;
     bool on_use_on_block : 1;
     bool on_block_break_by : 1;
+};
+
+struct ItemFuncNamesCache {
 };
 
 enum class ItemIconType {
@@ -34,6 +39,9 @@ struct ItemDef {
     /// @brief Item name will shown in inventory
     std::string caption;
 
+    /// @brief Item description will shown in inventory
+    std::string description = "";
+
     dv::value properties = nullptr;
 
     /// @brief Item max stack size
@@ -55,17 +63,23 @@ struct ItemDef {
     std::string icon = "blocks:notfound";
 
     std::string placingBlock = "core:air";
-    std::string scriptName = name.substr(name.find(':') + 1);
+    std::string scriptName;
 
     std::string modelName = name + ".model";
 
     std::string scriptFile;
+
+    std::vector<std::string> tags;
 
     struct {
         itemid_t id;
         blockid_t placingBlock;
         ItemFuncsSet funcsset {};
         bool emissive = false;
+
+        std::set<int> tags;
+
+        ItemFuncNamesCache eventNames;
     } rt {};
 
     ItemDef(const std::string& name);

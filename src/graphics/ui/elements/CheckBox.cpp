@@ -2,13 +2,14 @@
 
 #include <utility>
 
-#include "graphics/core/DrawContext.hpp"
-#include "graphics/core/Batch2D.hpp"
 #include "Label.hpp"
+#include "graphics/core/Batch2D.hpp"
+#include "graphics/core/DrawContext.hpp"
 
 using namespace gui;
 
-CheckBox::CheckBox(bool checked) : UINode(glm::vec2(32.0f)), checked(checked) {
+CheckBox::CheckBox(GUI& gui, bool checked)
+    : UINode(gui, glm::vec2(32.0f)), checked(checked) {
     setColor({0.0f, 0.0f, 0.0f, 0.5f});
     setHoverColor({0.05f, 0.1f, 0.2f, 0.75f});
 }
@@ -24,7 +25,8 @@ void CheckBox::draw(const DrawContext& pctx, const Assets&) {
     batch->rect(pos.x, pos.y, size.x, size.y);
 }
 
-void CheckBox::mouseRelease(GUI*, int, int) {
+void CheckBox::mouseRelease(int x, int y) {
+    UINode::mouseRelease(x, y);
     checked = !checked;
     if (consumer) {
         consumer(checked);
@@ -44,15 +46,21 @@ CheckBox* CheckBox::setChecked(bool flag) {
     return this;
 }
 
-FullCheckBox::FullCheckBox(const std::wstring& text, glm::vec2 size, bool checked)
-    : Panel(size), 
-      checkbox(std::make_shared<CheckBox>(checked)),
-      label(std::make_shared<Label>(text)) {
+FullCheckBox::FullCheckBox(
+    GUI& gui, const std::wstring& text, glm::vec2 size, bool checked
+)
+    : Panel(gui, size),
+      checkbox(std::make_shared<CheckBox>(gui, checked)),
+      label(std::make_shared<Label>(gui, text)) {
     setColor(glm::vec4(0.0f));
-    setOrientation(Orientation::horizontal);
+    setOrientation(Orientation::HORIZONTAL);
 
     add(checkbox);
-    
+
+    auto& checkboxActions = actions;
     label->setMargin(glm::vec4(5.f, 5.f, 0.f, 0.f));
+    label->listenAction(UIAction::CLICK, [&checkboxActions](auto& gui) {
+        checkboxActions.notify(UIAction::CLICK, gui);
+    });
     add(label);
 }

@@ -105,6 +105,19 @@ glm::vec4 Attribute::asColor() const {
     }
 }
 
+int Attribute::asNumbers(float* dst, size_t dstSize) const {
+    size_t pos = 0;
+    size_t count = 0;
+    while (pos < text.length() && count < dstSize) {
+        size_t end = text.find(',', pos);
+        dst[count++] = util::parse_double(
+            text, pos, std::min<size_t>(end - pos, text.length() - pos)
+        );
+        pos = end + 1;
+    }
+    return count;
+}
+
 Node::Node(std::string tag) : tag(std::move(tag)) {
 }
 
@@ -355,6 +368,97 @@ std::unique_ptr<Document> xml::parse(
     return parser.parse();
 }
 
+namespace {
+class VcmParser : public BasicParser<char> {
+public:
+    VcmParser(std::string_view filename, std::string_view source)
+        : BasicParser(filename, source) {
+        document = std::make_unique<Document>("1.0", "UTF-8");
+        hashComment = true;
+    }
+
+    std::string parseValue() {
+        char c = peek();
+        if (c == '"' || c == '\'') {
+            nextChar();
+            return parseString(c);
+        }
+        if (c == '(') {
+            nextChar();
+            int depth = 1;
+            size_t start = pos;
+            while (hasNext()) {
+                char c = nextChar();
+                if (c == '(') {
+                    depth++;
+                } else if (c == ')') {
+                    depth--;
+                    if (depth == 0) {
+                        goBack(1);
+                        break;
+                    }
+                }
+            }
+            expect(')');
+            return std::string(source.substr(start, pos - start - 1));
+        }
+        return std::string(readUntilWhitespace());
+    }
+
+    void parseSubElements(Node& node) {
+        skipWhitespace();
+        while (hasNext()) {
+            char c = peek();
+            if (c == '}') {
+                break;
+            }
+            if (c != '@') {
+                throw error("unexpected character in element");
+            }
+            nextChar();
+            auto subnodePtr = std::make_unique<Node>(parseName());
+            auto subnode = subnodePtr.get();
+            node.add(std::move(subnodePtr));
+
+            skipWhitespace();
+            while (hasNext() && peek() != '@' && peek() != '{' && peek() != '}') {
+                std::string attrname = parseName();
+                skipWhitespace();
+                std::string value = parseValue();
+                subnode->set(attrname, value);
+                skipWhitespace();
+            }
+            if (!hasNext()) {
+                break;
+            }
+            c = peek();
+            if (c == '{') {
+                nextChar();
+                parseSubElements(*subnode);
+                expect('}');
+                skipWhitespace();
+            }
+        }
+    }
+
+    std::unique_ptr<Document> parse(const std::string& rootTag) {
+        auto root = std::make_unique<Node>(rootTag);
+        parseSubElements(*root);
+        document->setRoot(std::move(root));
+        return std::move(document);
+    }
+private:
+    std::unique_ptr<Document> document;
+};
+}
+
+std::unique_ptr<Document> xml::parse_vcm(
+    std::string_view filename, std::string_view source, std::string_view tag
+) {
+    VcmParser parser(filename, source);
+    return parser.parse(std::string(tag));
+}
+
 inline void newline(
     std::stringstream& ss, bool nice, const std::string& indentStr, int indent
 ) {
@@ -434,5 +538,13 @@ std::string xml::stringify(
 
     stringifyElement(ss, *document.getRoot(), nice, indentStr, 0);
 
+    return ss.str();
+}
+
+std::string xml::stringify(
+    const Node& element, bool nice, const std::string& indentStr
+) {
+    std::stringstream ss;
+    stringifyElement(ss, element, nice, indentStr, 0);
     return ss.str();
 }

@@ -4,6 +4,10 @@
 
 Callbacks specified in block script.
 
+> [!WARNING]
+>  events such as on_block_tick, on_block_present, and on_block_removed
+> can cause performance issues if used carelessly or excessively.
+
 ```lua
 function on_placed(x, y, z, playerid)
 ```
@@ -20,7 +24,7 @@ Called on block broken by player
 function on_replaced(x, y, z, playerid)
 ```
 
-Called on block replaced with other by player
+Called before a player replaces a block
 
 ```lua
 function on_interact(x, y, z, playerid) -> bool
@@ -44,7 +48,29 @@ Called on random block update (grass growth)
 function on_blocks_tick(tps: int)
 ```
 
-Called tps (20) times per second. Use 1/tps instead of `time.delta()`.
+Called tps (20 / tick-interval) times per second. Use 1/tps instead of `time.delta()`.
+
+```lua
+function on_block_tick(x, y, z, tps: number)
+```
+
+Called tps (20 / tick-interval) times per second for a block.
+Use 1/tps instead of `time.delta()`.
+
+```lua
+function on_block_present(x, y, z)
+```
+
+Called for a specific block when it appears in the world (generated/loaded/placed).
+The call occurs within a time period that may depend on the event queue load.
+Under light load, it occurs during the first tick interval of the block.
+on_block_tick is not called until the event is called.
+
+```lua
+function on_block_removed(x, y, z)
+```
+
+Called when chunk containing the block unloads.
 
 ```lua
 function on_player_tick(playerid: int, tps: int)
@@ -126,6 +152,17 @@ function on_block_interact(blockid, x, y, z, playerid) -> bool
 
 Called on block RMB click interaction. Prevents block placing if **true** returned.
 
+```lua
+function on_entity_spawn(uid)
+```
+Called after an entity is spawned.
+
+```lua
+function on_entity_despawn(uid)
+```
+
+Called before an entity is despawned.
+
 ### Chunk Events (world.lua)
 
 ```lua
@@ -172,10 +209,25 @@ function on_close(invid: int)
 
 Called on element removed from the screen.
 
+## Content events
+
+Callbacks specified in *content.lua* script.
+
+```lua
+function on_scripts_loading()
+```
+
+Called before the content pack scripts are loaded
+
+```lua
+function on_content_loaded()
+```
+
+Called after the content pack has been fully loaded
+
 ## HUD events
 
 Callbacks specified in *hud.lua* script.
-
 
 ```lua
 function on_hud_open(playerid: int)
@@ -184,10 +236,28 @@ function on_hud_open(playerid: int)
 Called after world open.
 
 ```lua
+function on_hud_render()
+```
+
+Called every frame. Used for client-side tasks such as animation and camera control.
+
+```lua
 function on_hud_close(playerid: int)
 ```
 
 Called on world close (before saving)
+
+```lua
+function on_inventory_interact(invid: int, slot: int, action: int, mode: int)
+```
+
+Triggered when a player interacts with inventory slots.
+
+| ACTION / MODE | (0) PRIMARY                                        | (1) SECONDARY                                          |
+| ------------- | -------------------------------------------------- | ------------------------------------------------------ |
+| (0) PUT       | Places all items; if occupied, swaps them.         | Places a single item from the cursor into the slot.    |
+| (1) TAKE      | Picks up all items from the slot.                  | Picks up half of the items from the slot (rounded up). |
+| (2) SHARE     | Triggers the share event for the inventory layout. | Undefined                                              |
 
 ## *events* library
 

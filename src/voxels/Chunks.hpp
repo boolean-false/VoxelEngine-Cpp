@@ -1,15 +1,15 @@
 #pragma once
 
-#include <stdlib.h>
+#include "typedefs.hpp"
+#include "voxel.hpp"
+#include "constants.hpp"
+#include "util/AreaMap2D.hpp"
 
+#include <stdlib.h>
 #include <glm/glm.hpp>
 #include <memory>
 #include <set>
 #include <vector>
-
-#include "typedefs.hpp"
-#include "voxel.hpp"
-#include "util/AreaMap2D.hpp"
 
 class VoxelRenderer;
 
@@ -22,13 +22,19 @@ class LevelEvents;
 class Block;
 class VoxelsVolume;
 
+template <int w, int h, int d> class StaticVoxelsVolume;
+
+namespace blocks_agent {
+    struct RaycastSettings;
+}
+
 /// Player-centred chunks matrix
 class Chunks {
     LevelEvents* events;
     const ContentIndices& indices;
 
     void eraseSegments(const Block& def, blockstate state, int x, int y, int z);
-    void repairSegments(
+    void restoreSegments(
         const Block& def, blockstate state, int x, int y, int z
     );
     void setRotationExtended(
@@ -75,6 +81,7 @@ public:
         return get(pos.x, pos.y, pos.z);
     }
 
+    light_t getLight(const glm::ivec3& pos) const;
     light_t getLight(int32_t x, int32_t y, int32_t z) const;
     ubyte getLight(int32_t x, int32_t y, int32_t z, int channel) const;
     void set(int32_t x, int32_t y, int32_t z, uint32_t id, blockstate state);
@@ -109,7 +116,7 @@ public:
         glm::vec3& end,
         glm::ivec3& norm,
         glm::ivec3& iend,
-        std::set<blockid_t> filter = {}
+        const blocks_agent::RaycastSettings& settings
     ) const;
 
     glm::vec3 rayCastToObstacle(
@@ -126,12 +133,41 @@ public:
     bool isReplaceableBlock(int32_t x, int32_t y, int32_t z);
     bool isObstacleBlock(int32_t x, int32_t y, int32_t z);
 
-    void getVoxels(VoxelsVolume& volume, bool backlight = false) const;
+    void getVoxels(
+        VoxelsVolume& volume, bool backlight = false, int top = CHUNK_H
+    ) const;
+
+    template <int w, int h, int d>
+    void getVoxels(
+        StaticVoxelsVolume<w, h, d>& volume,
+        bool backlight = false,
+        int top = CHUNK_H
+    ) const {
+        getVoxels(
+            volume.getVoxels(),
+            volume.getLights(),
+            {volume.getX(), volume.getY(), volume.getZ()},
+            {w, h, d},
+            backlight,
+            top
+        );
+    }
+
+    void getVoxels(
+        voxel* voxels,
+        light_t* lights,
+        const glm::ivec3& pos,
+        const glm::ivec3& size,
+        bool backlight,
+        int top
+    ) const;
 
     void setCenter(int32_t x, int32_t z);
     void resize(uint32_t newW, uint32_t newD);
 
     void saveAndClear();
+
+    void remove(int32_t x, int32_t z);
 
     const std::vector<std::shared_ptr<Chunk>>& getChunks() const {
         return areaMap.getBuffer();

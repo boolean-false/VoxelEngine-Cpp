@@ -1,15 +1,9 @@
 #include "ContentBuilder.hpp"
 
-#include "objects/rigging.hpp"
-
 ContentBuilder::~ContentBuilder() = default;
 
 void ContentBuilder::add(std::unique_ptr<ContentPackRuntime> pack) {
     packs[pack->getId()] = std::move(pack);
-}
-
-void ContentBuilder::add(std::unique_ptr<rigging::SkeletonConfig> skeleton) {
-    skeletons[skeleton->getName()] = std::move(skeleton);
 }
 
 BlockMaterial& ContentBuilder::createBlockMaterial(const std::string& id) {
@@ -28,12 +22,33 @@ std::unique_ptr<Content> ContentBuilder::build() {
         // Generating runtime info
         def.rt.id = blockDefsIndices.size();
         def.rt.emissive = *reinterpret_cast<uint32_t*>(def.emission);
-        def.rt.solid = def.model == BlockModel::block;
-        def.rt.extended = def.size.x > 1 || def.size.y > 1 || def.size.z > 1;
+        for (const auto& tag : def.tags) {
+            def.rt.tags.insert(tags.add(tag));
+        }
+
+        auto isSolid = [](const Variant& variant) {
+            return variant.model.type == BlockModelType::BLOCK ||
+                   variant.culling == CullingMode::OPTIONAL;
+        };
+
+        if (def.variants) {
+            for (auto& variant : def.variants->variants) {
+                variant.rt.solid = isSolid(variant) || def.explictlySolid;
+            }
+            def.defaults = def.variants->variants.at(0);
+        } else {
+            def.defaults.rt.solid = isSolid(def.defaults) || def.explictlySolid;
+        }
+        def.rt.solid = def.defaults.rt.solid;
 
         const float EPSILON = 0.01f;
-        if (def.rt.extended && glm::i8vec3(def.hitboxes[0].size() + EPSILON) == def.size) {
-            def.rt.solid = true;
+        def.rt.solid = def.rt.solid &&
+            def.obstacle &&
+            (glm::i8vec3(def.hitboxes[0].size() + EPSILON) == def.size);
+        def.rt.extended = def.size.x > 1 || def.size.y > 1 || def.size.z > 1;
+
+        if (def.material.empty()) {
+            defaults.at("block-material").get(def.material);
         }
 
         if (def.rotatable) {
@@ -46,11 +61,11 @@ std::unique_ptr<Content> ContentBuilder::build() {
                 }
             }
         } else {
-            def.rt.hitboxes->emplace_back(AABB(glm::vec3(1.0f)));
+            def.rt.hitboxes[0] = def.hitboxes;
         }
 
         blockDefsIndices.push_back(&def);
-        groups->insert(def.drawGroup);
+        groups->insert(def.defaults.drawGroup); // FIXME: variants
     }
 
     std::vector<ItemDef*> itemDefsIndices;
@@ -83,9 +98,9 @@ std::unique_ptr<Content> ContentBuilder::build() {
         generators.build(),
         std::move(packs),
         std::move(blockMaterials),
-        std::move(skeletons),
         std::move(resourceIndices),
-        std::move(defaults)
+        std::move(defaults),
+        std::move(tags.map)
     );
 
     // Now, it's time to resolve foreign keys

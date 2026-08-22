@@ -1,29 +1,38 @@
 #include "Decorator.hpp"
 
-#include "ParticlesRenderer.hpp"
-#include "WorldRenderer.hpp"
-#include "TextsRenderer.hpp"
-#include "TextNote.hpp"
 #include "assets/assets_util.hpp"
+#include "assets/Assets.hpp"
+#include "audio/audio.hpp"
 #include "content/Content.hpp"
-#include "voxels/Chunks.hpp"
-#include "voxels/Chunk.hpp"
-#include "voxels/Block.hpp"
-#include "world/Level.hpp"
-#include "window/Camera.hpp"
+#include "debug/Logger.hpp"
+#include "engine/Engine.hpp"
+#include "engine/EnginePaths.hpp"
+#include "io/io.hpp"
+#include "logic/LevelController.hpp"
+#include "maths/util.hpp"
+#include "objects/Entities.hpp"
+#include "objects/Entity.hpp"
 #include "objects/Player.hpp"
 #include "objects/Players.hpp"
-#include "objects/Entities.hpp"
-#include "logic/LevelController.hpp"
+#include "ParticlesRenderer.hpp"
+#include "settings.hpp"
+#include "TextNote.hpp"
+#include "TextsRenderer.hpp"
 #include "util/stringutil.hpp"
-#include "engine/Engine.hpp"
-#include "io/io.hpp"
-#include "audio/audio.hpp"
-#include "maths/util.hpp"
+#include "voxels/Block.hpp"
+#include "voxels/Chunk.hpp"
+#include "voxels/Chunks.hpp"
+#include "voxels/blocks_agent.hpp"
+#include "window/Camera.hpp"
+#include "world/Level.hpp"
+#include "world/Weather.hpp"
+#include "WorldRenderer.hpp"
 
 namespace fs = std::filesystem;
 
-/// @brief Not greather than 64 for this BIG_PRIME value
+static debug::Logger logger("decorator");
+
+/// @brief Not greater than 64 for this BIG_PRIME value
 inline constexpr int UPDATE_AREA_DIAMETER = 32;
 /// @brief Number of blocks in the volume
 inline constexpr int UPDATE_BLOCKS =
@@ -42,6 +51,7 @@ Decorator::Decorator(
 )
     : level(*controller.getLevel()),
       assets(assets),
+      settings(engine.getSettings()),
       player(player),
       renderer(renderer) {
     controller.getBlocksController()->listenBlockInteraction(
@@ -50,36 +60,109 @@ Decorator::Decorator(
             addParticles(def, pos);
         }
     });
+    playerNamePreset.deserialize(engine.getResPaths().readCombinedObject(
+        "presets/text3d/player_name.toml"
+    ));
     for (const auto& [id, player] : *level.players) {
-        if (id == this->player.getId()) {
+        if (id == this->player.getId() || player->isSuspended()) {
             continue;
         }
         playerTexts[id] = renderer.texts->add(std::make_unique<TextNote>(
-            util::str2wstr_utf8(player->getName()),
-            playerNamePreset,
-            player->getPosition()
+            player->getName(), playerNamePreset, player->getPosition()
         ));
     }
-    playerNamePreset.deserialize(engine.getResPaths()->readCombinedObject(
-        "presets/text3d/player_name.toml"
-    ));
 }
 
 void Decorator::addParticles(const Block& def, const glm::ivec3& pos) {
     const auto& found = blockEmitters.find(pos);
-    if (found == blockEmitters.end()) {
-        auto treg = util::get_texture_region(
-            assets, def.particles->texture, ""
-        );
-        blockEmitters[pos] = renderer.particles->add(std::make_unique<Emitter>(
-            level,
-            glm::vec3{pos.x + 0.5, pos.y + 0.5, pos.z + 0.5},
-            *def.particles,
-            treg.texture,
-            treg.region,
-            -1
-        ));
+    if (found != blockEmitters.end()) {
+        return;
     }
+    auto treg = util::get_texture_region(
+        assets, def.particles->texture, ""
+    );
+    blockEmitters[pos] = renderer.particles->add(std::make_unique<Emitter>(
+        level,
+        glm::vec3{pos.x + 0.5, pos.y + 0.5, pos.z + 0.5},
+        *def.particles,
+        treg.texture,
+        treg.region,
+        -1
+    ));
+}
+
+void Decorator::updateAcoustics(const Camera& camera) {
+    if (!settings.audio.acousticEffects.get()) {
+        return;
+    }
+    audio::Acoustics acoustics {};
+    util::PseudoRandom random(34621U);
+
+    auto& chunks = *player.chunks;
+    const auto& start = camera.position;
+    float length = 40.0f;
+
+    auto& blocks = level.content.getIndices()->blocks;
+
+    int rays = 100;
+    int hit = 0;
+    float averageDistance = 0.0f;
+    float averageAbsorption = 0.0f;
+    float speedOfSound = 300.0f;
+    float minDistance = length;
+    for (int i = 0; i < rays; i++) {
+        float u1 = random.randFloat();
+        float u2 = random.randFloat();
+        float z = 2.0f * u1 - 1.0f;
+        float phi = 2.0f * glm::pi<float>() * u2;
+        float r = std::sqrt(1.0f - z * z);
+
+        glm::vec3 dir = { r * std::cos(phi), r * std::sin(phi), z };
+
+        dir = glm::normalize(dir);
+        glm::vec3 end;
+        glm::ivec3 norm;
+        glm::ivec3 iend;
+        blocks_agent::RaycastSettings raycast {};
+        auto vox = chunks.rayCast(start, dir, length, end, norm, iend, raycast);
+        if (vox == nullptr) {
+            continue;
+        }
+        auto distance = glm::distance(start, end);
+        if (distance >= length * 0.98f) {
+            continue;
+        }
+        if (distance < minDistance) {
+            minDistance = distance;
+        }
+        auto def = blocks.get(vox->id);
+        if (def == nullptr) {
+            continue;
+        }
+        auto material = level.content.findBlockMaterial(def->material);
+        if (material == nullptr) {
+            return;
+        }
+        hit++;
+        averageDistance += distance;
+        averageAbsorption += material->soundAbsorption;
+    }
+    if (hit > 0) {
+        averageDistance /= hit;
+        averageAbsorption /= hit;
+    }
+
+    float decayTime = 20.0f * (averageDistance / length);
+    float escapeRatio = static_cast<float>(rays - hit) / static_cast<float>(rays);
+
+    acoustics.reverbGain = glm::pow(hit / static_cast<float>(rays), 3.0f);
+    acoustics.reverbReflectionsDelay = minDistance / speedOfSound;
+    acoustics.reverbLateReflectionsDelay = averageDistance / speedOfSound;
+    acoustics.reverbDecayTime = decayTime;
+    acoustics.reverbRoomRolloff = escapeRatio * 1.5f;
+    acoustics.reverbAbsorption = averageAbsorption;
+
+    audio::set_acoustics(std::move(acoustics));
 }
 
 void Decorator::updateRandom(
@@ -191,8 +274,7 @@ void Decorator::updateBlockEmitters(const Camera& camera) {
                 remove = true;
             }
         } else {
-            iter = blockEmitters.erase(iter);
-            continue;
+            remove = true;
         }
         if (util::distance2(iter->first, glm::ivec3(camera.position)) >
             UPDATE_AREA_DIAMETER * UPDATE_AREA_DIAMETER) {
@@ -214,9 +296,7 @@ void Decorator::updateTextNotes() {
             continue;
         }
         playerTexts[id] = renderer.texts->add(std::make_unique<TextNote>(
-            util::str2wstr_utf8(player->getName()),
-            playerNamePreset,
-            player->getPosition()
+            player->getName(), playerNamePreset, player->getPosition()
         ));
     }
 
@@ -224,7 +304,7 @@ void Decorator::updateTextNotes() {
     while (textsIter != playerTexts.end()) {
         auto note = renderer.texts->get(textsIter->second);
         auto player = level.players->get(textsIter->first);
-        if (player == nullptr) {
+        if (player == nullptr || player->isSuspended()) {
             renderer.texts->remove(textsIter->second);
             textsIter = playerTexts.erase(textsIter);
         } else {
@@ -233,6 +313,9 @@ void Decorator::updateTextNotes() {
                 position = entity->getInterpolatedPosition();
             }
             note->setPosition(position + glm::vec3(0, 1, 0));
+            if (note->getText() != player->getName()) {
+                note->setText(player->getName());
+            }
             ++textsIter;
         }
     }
@@ -280,4 +363,5 @@ void Decorator::update(
     }
     updateBlockEmitters(camera);
     updateTextNotes();
+    updateAcoustics(camera);
 }

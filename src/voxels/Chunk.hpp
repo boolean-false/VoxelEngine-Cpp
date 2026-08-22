@@ -27,30 +27,31 @@ public:
     int x, z;
     int bottom, top;
     voxel voxels[CHUNK_VOL] {};
-    Lightmap lightmap;
+    std::shared_ptr<Lightmap> lightmap;
     struct {
-        bool modified : 1;
-        bool ready : 1;
-        bool loaded : 1;
-        bool lighted : 1;
-        bool unsaved : 1;
-        bool loadedLights : 1;
-        bool entities : 1;
-        bool blocksData : 1;
+        bool modified : 1; // is chunk mesh should be updated
+        bool ready : 1; // is chunk ready for modifications (loaded / generated)
+        bool loaded : 1; // was chunk loaded from region
+        bool lighted : 1; // is lights built (chunk ready to be visualized)
+        bool unsaved : 1; // does chunk contain unsaved changes
+        bool loadedLights : 1; // was lights loaded from cache
+        bool entities : 1; // does chunk contain entities list changes
+        bool blocksData : 1; // does chunk contain block fields changes
+        bool dirtyHeights : 1; // is chunk bottom, top should be recalculated
+        bool inventoriesRemoved : 1; // was block inventories removed since the last save
     } flags {};
+
+    uint64_t lastRandomTickId = -1;
 
     /// @brief Block inventories map where key is index of block in voxels array
     ChunkInventoriesMap inventories;
     /// @brief Blocks metadata heap
     BlocksMetadata blocksMetadata;
 
-    Chunk(int x, int z);
+    Chunk(int x, int z, std::shared_ptr<Lightmap> lightmap=nullptr);
 
     /// @brief Refresh `bottom` and `top` values
     void updateHeights();
-
-    // unused
-    std::unique_ptr<Chunk> clone() const;
 
     /// @brief Creates new block inventory given size
     /// @return inventory id or 0 if block does not exists
@@ -82,5 +83,11 @@ public:
             glm::vec3(x * CHUNK_W, -INFINITY, z * CHUNK_D),
             glm::vec3((x + 1) * CHUNK_W, INFINITY, (z + 1) * CHUNK_D)
         );
+    }
+
+    bool isBlockInside(int x, int z) const {
+        x -= this->x * CHUNK_W;
+        z -= this->z * CHUNK_D;
+        return x >= 0 && z >= 0 && x < CHUNK_W && z < CHUNK_D;
     }
 };

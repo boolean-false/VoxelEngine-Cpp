@@ -13,7 +13,7 @@ namespace gui {
 
     using PageLoaderFunc = std::function<std::shared_ptr<UINode>(const std::string&)>;
 
-    class Menu : public Container {
+    class Menu final : public Container {
     protected:
         std::unordered_map<std::string, Page> pages;
         std::stack<Page> pageStack;
@@ -21,7 +21,7 @@ namespace gui {
         std::unordered_map<std::string, supplier<std::shared_ptr<UINode>>> pageSuppliers;
         PageLoaderFunc pagesLoader = nullptr;
     public:
-        Menu();
+        explicit Menu(GUI& gui);
 
         /// @brief Check menu have page or page supplier
         /// @param name page name

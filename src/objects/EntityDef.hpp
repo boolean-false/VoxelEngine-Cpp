@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #include "typedefs.hpp"
+#include "data/dv.hpp"
 #include "maths/aabb.hpp"
 #include "physics/Hitbox.hpp"
 
@@ -12,12 +13,17 @@ namespace rigging {
     class SkeletonConfig;
 }
 
+struct ComponentInstance {
+    std::string component;
+    dv::value params;
+};
+
 struct EntityDef {
     /// @brief Entity string id (with prefix included)
     std::string const name;
 
-    /// @brief Component IDs
-    std::vector<std::string> components;
+    /// @brief Component instances
+    std::vector<ComponentInstance> components;
 
     /// @brief Physic body type
     BodyType bodyType = BodyType::DYNAMIC;
@@ -33,8 +39,26 @@ struct EntityDef {
     /// @brief Skeleton ID
     std::string skeletonName = name;
 
+    /// @brief Solid entity material material
+    std::string material;
+
+    /// @brief Can the entity be interacted with cursor (on_attack, on_use)
+    bool selectable = true;
+
     /// @brief Does entity prevent blocks setup
     bool blocking = true;
+
+    /// @brief Is the entity solid (blocks other entities)
+    bool solid = false;
+
+    /// @brief Mass for physics calculations
+    float mass = 1.0f;
+
+    /// @brief Elasticity for physics calculations
+    float elasticity = 0.0f;
+
+    /// @brief Max obstacle height that does not require jumping
+    float stepHeight = 0.5f;
 
     /// @brief save-** flags
     struct {

@@ -26,10 +26,28 @@ entity:get_uid() -> int
 entity:get_component(name: str) -> component or nil
 -- Checks for the presence of a component by name
 entity:has_component(name: str) -> bool
+-- Retrieves a component by name. Throws an exception if it does not exist
+entity:require_component(name: str) -> component
 
 -- Enables/disables the component
 entity:set_enabled(name: str, enable: bool)
+
+-- Returns id of player the entity is bound, otherwise -1 is returned.
+-- At components initialization -1 is also returned,
+-- since the binding occurs after initialization.
+entity:get_player() -> int or nil
 ```
+
+## Custom Components
+
+A component is defined as a script in `{pack}/scripts/components/{name}.lua`.
+The component will be available for use in the entity definition as `{pack}:{name}`.
+Example: `core:scripts/components/pathfinding.lua` -> `core:pathfinding`.
+
+For **each** entity containing a component, a **separate instance** is created with **its own namespace** within the pack namespace.
+Global variables declared in it act as public fields of the component (same for global functions).
+
+Entity components are specified via the ["components" list](../entity-properties.md#components)
 
 ## Built-in components
 
@@ -81,19 +99,21 @@ body:get_size() -> vec3
 body:set_size(size: vec3)
 
 -- Returns the gravity multiplier
-body:get_gravity_scale() -> vec3
+body:get_gravity_scale() -> number
 -- Sets the gravity multiplier
-body:set_gravity_scale(scale: vec3)
+body:set_gravity_scale(scale: number)
 
 -- Returns the linear velocity attenuation multiplier (used to simulate air resistance and friction)
 body:get_linear_damping() -> number
 -- Sets the linear velocity attenuation multiplier
 body:set_linear_damping(value: number)
 
--- Checks if vertical velocity attenuation is enabled
+-- Checks if vertical damping is enabled
 body:is_vdamping() -> bool
--- Enables/disables vertical velocity attenuation
-body:set_vdamping(enabled: bool)
+-- Returns the vertical damping multiplier
+body:get_vdamping() -> number
+-- Enables/disables vertical damping / sets vertical damping multiplier
+body:set_vdamping(enabled: bool | number)
 
 -- Checks if the entity is on the ground
 body:is_grounded() -> bool
@@ -107,6 +127,24 @@ body:set_crouching(enabled: bool)
 body:get_body_type() -> str
 -- Sets the physical body type
 body:set_body_type(type: str)
+
+-- Returns the body material (same as for blocks)
+body:get_material() -> str
+-- Sets the body material
+body:set_material(material: str)
+
+-- Returns the body's mass
+body:get_mass() -> number
+-- Sets the body's mass
+body:set_mass(mass: number)
+
+-- Returns the body's elasticity
+body:get_elasticity() -> number
+-- Sets the body's elasticity
+body:set_elasticity(elasticity: number)
+
+-- Returns the velocity of the surface the body is on, or {0,0,0}
+body:get_ground_vel() -> vec3
 ```
 
 ### Skeleton
@@ -153,6 +191,10 @@ rig:get_color() -> vec3
 rig:set_color(color: vec3)
 ```
 
+> [!WARNING]
+> When an entity moves outside the loaded area, it is removed, triggering the event.
+> When it re-enters the loaded area, the entity is spawned again.
+
 ## Component events
 
 ```lua
@@ -184,6 +226,12 @@ function on_update(tps: int)
 ```
 
 Called every entities tick (currently 20 times per second).
+
+```lua
+function on_physics_update(delta: number)
+```
+
+Called after each physics step
 
 ```lua
 function on_render(delta: number)
@@ -227,3 +275,9 @@ function on_used(playerid: int)
 ```
 
 Called when an entity is used (RMB by entity). The player ID is passed as an argument.
+
+```lua
+function on_player_set(playerid: int)
+```
+
+Called when an entity is attached to a player.

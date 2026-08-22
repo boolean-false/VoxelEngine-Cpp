@@ -1,13 +1,13 @@
 #include "rigging.hpp"
 
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
+
 #include "assets/Assets.hpp"
 #include "coders/json.hpp"
 #include "data/dv_util.hpp"
 #include "graphics/commons/Model.hpp"
 #include "graphics/render/ModelBatch.hpp"
-
-#include <glm/ext/matrix_transform.hpp>
-#include <glm/gtx/matrix_decompose.hpp>
 
 using namespace rigging;
 
@@ -23,7 +23,7 @@ Bone::Bone(
     std::string name,
     std::string model,
     std::vector<std::unique_ptr<Bone>> bones,
-    glm::vec3 offset
+    const glm::vec3& offset
 )
     : index(index),
       name(std::move(name)),
@@ -39,7 +39,7 @@ void Bone::setModel(const std::string& name) {
     model = {name, nullptr, true};
 }
 
-Skeleton::Skeleton(const SkeletonConfig* config)
+Skeleton::Skeleton(std::shared_ptr<const SkeletonConfig> config)
     : config(config),
       pose(config->getBones().size()),
       calculated(config->getBones().size()),
@@ -53,9 +53,62 @@ Skeleton::Skeleton(const SkeletonConfig* config)
     }
 }
 
+dv::value Skeleton::serialize(bool saveTextures, bool savePose) const {
+    auto root = dv::object();
+    if (saveTextures) {
+        auto& map = root.object("textures");
+        for (auto& [slot, texture] : textures) {
+            map[slot] = texture;
+        }
+    }
+    if (savePose) {
+        auto& list = root.list("pose");
+        for (auto& mat : pose.matrices) {
+            list.add(dv::to_value(mat));
+        }
+    }
+    return root;
+}
+
+void Skeleton::deserialize(const dv::value& root) {
+    if (auto found = root.at("textures")) {
+        auto& texturesmap = *found;
+        for (auto& [slot, _] : texturesmap.asObject()) {
+            texturesmap.at(slot).get(textures[slot]);
+        }
+    }
+    if (auto found = root.at("pose")) {
+        auto& posearr = *found;
+        auto& matrices = pose.matrices;
+        for (size_t i = 0; i < std::min(matrices.size(), posearr.size()); i++) {
+            dv::get_mat(posearr[i], pose.matrices[i]);
+        }
+    }
+}
+
+void Skeleton::setConfig(std::shared_ptr<const SkeletonConfig> rigConfig) {
+    config = std::move(rigConfig);
+
+    const auto& bones = config->getBones();
+
+    pose.matrices.resize(
+        bones.size(), glm::mat4(1.0f)
+    );
+    calculated.matrices.resize(
+        bones.size(), glm::mat4(1.0f)
+    );
+
+    modelOverrides.resize(bones.size());
+    flags.resize(bones.size());
+
+    for (size_t i = 0; i < bones.size(); i++) {
+        flags[i].visible = true;
+    }
+}
+
 static void get_all_nodes(std::vector<Bone*>& nodes, Bone* node) {
     nodes[node->getIndex()] = node;
-    for (auto& subnode : node->getSubnodes()) {
+    for (auto& subnode : node->getBones()) {
         get_all_nodes(nodes, subnode.get());
     }
 }
@@ -64,6 +117,7 @@ SkeletonConfig::SkeletonConfig(
     const std::string& name, std::unique_ptr<Bone> root, size_t nodesCount
 )
     : name(name), root(std::move(root)), nodes(nodesCount) {
+    assert(this->root.get() != nullptr);
     get_all_nodes(nodes, this->root.get());
 }
 
@@ -78,7 +132,7 @@ size_t SkeletonConfig::update(
     }
     skeleton.calculated.matrices[index] = matrix * baseMatrix * boneMatrix;
     size_t count = 1;
-    for (auto& subnode : node->getSubnodes()) {
+    for (auto& subnode : node->getBones()) {
         count += update(
             index + count,
             skeleton,
@@ -89,21 +143,32 @@ size_t SkeletonConfig::update(
     return count;
 }
 
+static glm::mat4 build_matrix(
+    const glm::mat3& rot, const glm::vec3& pos, const glm::vec3& scale
+) {
+    glm::mat4 combined(1.0f);
+    combined = glm::translate(combined, pos);
+    combined = combined * glm::mat4(rot);
+    combined = glm::scale(combined, scale);
+    return combined;
+}
+
 void SkeletonConfig::update(
-    Skeleton& skeleton, const glm::mat4& matrix, const glm::vec3& position
+    Skeleton& skeleton,
+    const glm::mat3& rotation,
+    const glm::vec3& position,
+    const glm::vec3& scale
 ) const {
     if (skeleton.interpolation.isEnabled()) {
         const auto& interpolation = skeleton.interpolation;
-        glm::vec3 scale, translation, skew;
-        glm::quat rotation;
-        glm::vec4 perspective;
-        glm::decompose(matrix, scale, rotation, translation, skew, perspective);
-
-        auto delta = interpolation.getCurrent() - position;
-        auto interpolatedMatrix = glm::translate(matrix, delta);
-        update(0, skeleton, root.get(), interpolatedMatrix);
+        update(
+            0,
+            skeleton,
+            root.get(),
+            build_matrix(rotation, interpolation.getCurrent(), scale)
+        );
     } else {
-        update(0, skeleton, root.get(), matrix);
+        update(0, skeleton, root.get(), build_matrix(rotation, position, scale));
     }
 }
 
@@ -111,10 +176,14 @@ void SkeletonConfig::render(
     const Assets& assets,
     ModelBatch& batch,
     Skeleton& skeleton,
-    const glm::mat4& matrix,
-    const glm::vec3& position
+    const glm::mat3& rotation,
+    const glm::vec3& position,
+    const glm::vec3& scale
 ) const {
-    update(skeleton, matrix, position);
+    if (skeleton.config->root == nullptr) {
+        return;
+    }
+    update(skeleton, rotation, position, scale);
 
     if (!skeleton.visible) {
         return;
@@ -142,7 +211,7 @@ void SkeletonConfig::render(
     }
 }
 
-Bone* SkeletonConfig::find(std::string_view str) const {
+const Bone* SkeletonConfig::find(std::string_view str) const {
     for (size_t i = 0; i < nodes.size(); i++) {
         auto* node = nodes[i];
         if (node->getName() == str) {

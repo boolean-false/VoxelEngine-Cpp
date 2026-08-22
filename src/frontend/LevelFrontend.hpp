@@ -1,32 +1,35 @@
 #pragma once
 
+#include "world/Weather.hpp"
+
 #include <memory>
 
-class Level;
 class Assets;
-class Player;
 class ContentGfxCache;
+class Engine;
+class Level;
 class LevelController;
+class PlayerController;
 struct EngineSettings;
 
 class LevelFrontend {
     Level& level;
-    LevelController* controller;
-    const Assets& assets;
+    LevelController& controller;
+    Assets& assets;
     std::unique_ptr<ContentGfxCache> contentCache;
+    Weather weather {};
 public:
     LevelFrontend(
-        Player* currentPlayer,
-        LevelController* controller,
-        Assets& assets,
+        Engine& engine,
+        PlayerController& currentPlayer,
+        LevelController& controller,
         const EngineSettings& settings
     );
     ~LevelFrontend();
 
     Level& getLevel();
-    const Level& getLevel() const;
-    const Assets& getAssets() const;
     const ContentGfxCache& getContentGfxCache() const;
     ContentGfxCache& getContentGfxCache();
-    LevelController* getController() const;
+    LevelController& getController() const;
+    Weather& getWeather();
 };

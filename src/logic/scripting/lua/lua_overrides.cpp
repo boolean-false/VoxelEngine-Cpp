@@ -14,7 +14,7 @@ int l_print(lua::State* L) {
         lua::pushvalue(L, i);  /* value to print */
         lua::call(L, 1, 1);
         const char* s = lua::tostring(L, -1); /* get result */
-        if (s == NULL)
+        if (s == nullptr)
             return luaL_error(
                 L,
                 LUA_QL("tostring") " must return a string to " LUA_QL("print")
@@ -39,14 +39,16 @@ int l_crc32(lua::State* L) {
                 string.length()
             )
         );
-    } else if (auto bytearray = lua::touserdata<lua::LuaBytearray>(L, 1)) {
-        auto& bytes = bytearray->data();
-        return lua::pushinteger(L, crc32(value, bytes.data(), bytes.size()));
     } else if (lua::istable(L, 1)) {
         std::vector<ubyte> bytes;
         lua::read_bytes_from_table(L, 1, bytes);
         return lua::pushinteger(L, crc32(value, bytes.data(), bytes.size()));
     } else {
-        throw std::runtime_error("invalid argument 1");
+        auto string = lua::bytearray_as_string(L, 1);
+        auto res = crc32(
+            value, reinterpret_cast<const ubyte*>(string.data()), string.size()
+        );
+        lua::pop(L);
+        return lua::pushinteger(L, res);
     }
 }

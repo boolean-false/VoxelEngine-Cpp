@@ -2,8 +2,10 @@
 
 #include <algorithm>
 
+#include "content/Content.hpp"
 #include "debug/Logger.hpp"
 #include "engine/Engine.hpp"
+#include "engine/EnginePaths.hpp"
 #include "world/files/WorldFiles.hpp"
 #include "maths/voxmaths.hpp"
 #include "objects/Entities.hpp"
@@ -11,6 +13,7 @@
 #include "objects/Player.hpp"
 #include "physics/Hitbox.hpp"
 #include "voxels/Chunks.hpp"
+#include "voxels/Pathfinding.hpp"
 #include "scripting/scripting.hpp"
 #include "lighting/Lighting.hpp"
 #include "settings.hpp"
@@ -21,12 +24,14 @@
 static debug::Logger logger("level-control");
 
 LevelController::LevelController(
-    Engine* engine, std::unique_ptr<Level> levelPtr, Player* clientPlayer
+    Engine& engine, std::unique_ptr<Level> levelPtr, Player* clientPlayer
 )
-    : settings(engine->getSettings()),
+    : engine(engine),
+      settings(engine.getSettings()),
       level(std::move(levelPtr)),
       chunks(std::make_unique<ChunksController>(*level)),
-      playerTickClock(20, 3) {
+      playerTickClock(20, 3),
+      clientPlayer(clientPlayer) {
     
     level->events->listen(LevelEventType::CHUNK_PRESENT, [](auto, Chunk* chunk) {
         scripting::on_chunk_present(*chunk, chunk->flags.loaded);
@@ -37,7 +42,7 @@ LevelController::LevelController(
 
     if (clientPlayer) {
         chunks->lighting = std::make_unique<Lighting>(
-            level->content, *clientPlayer->chunks
+            *level->content.getIndices(), *clientPlayer->chunks
         );
     }
     blocks = std::make_unique<BlocksController>(
@@ -58,7 +63,7 @@ LevelController::LevelController(
             player->chunks->configure(
                 std::floor(position.x), std::floor(position.z), 1
             );
-            chunks->update(16, 1, 0, *player);
+            chunks->update(16, 1, 0, *player, player.get() == clientPlayer);
             if (player->chunks->get(
                     std::floor(position.x), 0, std::floor(position.z)
                 )) {
@@ -69,38 +74,42 @@ LevelController::LevelController(
 }
 
 void LevelController::update(float delta, bool pause) {
+    level->pathfinding->performAllAsync(
+        settings.pathfinding.stepsPerAsyncAgent.get()
+    );
     for (const auto& [_, player] : *level->players) {
         if (player->isSuspended()) {
             continue;
         }
         player->rotationInterpolation.updateTimer(delta);
-        player->updateEntity();
         glm::vec3 position = player->getPosition();
         player->chunks->configure(
-            position.x,
-            position.z,
+            glm::floor(position.x),
+            glm::floor(position.z),
             settings.chunks.loadDistance.get() + settings.chunks.padding.get()
         );
         chunks->update(
             settings.chunks.loadSpeed.get(),
             settings.chunks.loadDistance.get(),
             settings.chunks.padding.get(),
-            *player
+            *player,
+            player.get() == clientPlayer
         );
+        player->updateEntity();
     }
     if (!pause) {
-        // update all objects that needed
         blocks->update(delta, settings.chunks.padding.get());
-        level->entities->updatePhysics(delta);
         level->entities->update(delta);
         for (const auto& [_, player] : *level->players) {
             if (player->isSuspended()) {
                 continue;
             }
-            if (playerTickClock.update(delta)) {
-                if (player->getId() % playerTickClock.getParts() ==
-                    playerTickClock.getPart()) {
-                    
+            if (int parts = playerTickClock.update(delta)) {
+                for (int i = 0; i < parts; i++) {
+                    if (player->getId() % playerTickClock.getParts() !=
+                        playerTickClock.convertPart(i)) {
+                        continue;
+                    }
                     const auto& position = player->getPosition();
                     if (player->chunks->get(
                         std::floor(position.x),
@@ -112,27 +121,40 @@ void LevelController::update(float delta, bool pause) {
                         );
                     }
                 }
+
             }
         }
     }
     level->entities->clean();
 }
 
+void LevelController::processBeforeQuit() {
+    preQuitCallbacks.notify();
+    // todo: move somewhere else
+    for (auto player : level->players->getAll()) {
+        if (player->chunks) {
+            player->chunks->saveAndClear();
+        }
+    }
+    scripting::process_before_quit();
+}
+
 void LevelController::saveWorld() {
-    auto world = level->getWorld();
-    if (world->isNameless()) {
+    auto& world = level->getWorld();
+    if (world.isNameless()) {
         logger.info() << "nameless world will not be saved";
         return;
     }
-    logger.info() << "writing world '" << world->getName() << "'";
-    world->wfile->createDirectories();
+    logger.info() << "writing world '" << world.getName() << "'";
+    world.wfile->createDirectories();
     scripting::on_world_save();
     level->onSave();
-    level->getWorld()->write(level.get());
+    level->getWorld().write(*level);
 }
 
 void LevelController::onWorldQuit() {
     scripting::on_world_quit();
+    engine.getPaths().setCurrentWorldFolder("");
 }
 
 Level* LevelController::getLevel() {

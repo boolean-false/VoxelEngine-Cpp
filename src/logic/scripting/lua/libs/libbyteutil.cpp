@@ -99,7 +99,7 @@ static int pack(lua::State* L, const char* format, bool usetable) {
         }
         return 1;
     } else {
-        return lua::newuserdata<lua::LuaBytearray>(L, builder.build());
+        return lua::create_bytearray(L, builder.build());
     }
 }
 
@@ -130,14 +130,14 @@ static int count_elements(const char* format) {
 static int l_unpack(lua::State* L) {
     const char* format = lua::require_string(L, 1);
     int count = count_elements(format);
-    auto bytes = lua::require_bytearray(L, 2);
-    ByteReader reader(bytes);
+    auto bytes = lua::bytearray_as_string(L, 2);
+    ByteReader reader(reinterpret_cast<const ubyte*>(bytes.data()), bytes.size());
     bool bigEndian = false;
 
     for (size_t i = 0; format[i]; i++) {
         switch (format[i]) {
             case 'b':
-                lua::pushinteger(L, reader.get());
+                lua::pushinteger(L, static_cast<int8_t>(reader.get()));
                 break;
             case 'B':
                 lua::pushinteger(L, reader.get() & 0xFF);
@@ -197,9 +197,16 @@ static int l_tpack(lua::State* L) {
     return pack(L, format, true);
 }
 
+static int l_get_size(lua::State* L) {
+    return lua::pushinteger(
+        L, static_cast<int>(calc_size(lua::require_string(L, 1)))
+    );
+}
+
 const luaL_Reg byteutillib[] = {
     {"pack", lua::wrap<l_pack>},
     {"tpack", lua::wrap<l_tpack>},
     {"unpack", lua::wrap<l_unpack>},
-    {NULL, NULL}
+    {"get_size", lua::wrap<l_get_size>},
+    {nullptr, nullptr}
 };

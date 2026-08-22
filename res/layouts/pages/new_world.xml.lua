@@ -1,4 +1,4 @@
-settings = session.get_entry('new_world')
+settings = session.get('new_world')
 
 function world_name_validator(name)
     return name:match("^[%w-\\.\\ ]+$") ~= nil and not world.exists(name)
@@ -20,8 +20,18 @@ function create_world()
     local name = document.name_box.text
     local seed = document.seed_box.text
     local generator = settings.generator
-    session.reset_entry('new_world')
-    core.new_world(name, seed, generator)
+    session.reset('new_world')
+    app.new_world(name, seed, generator)
+end
+
+function world_name_placeholder()
+    local name = "New World"
+    local number = 0
+    while world.exists(name) do
+        number = number + 1
+        name = "New World " .. tostring(number)
+    end
+    return name
 end
 
 function on_open()
@@ -33,11 +43,12 @@ function on_open()
         settings.generator = generation.get_default_generator()
     end
     document.generator_btn.text = string.format(
-        "%s: %s", 
-        gui.str("World generator", "world"), 
+        "%s: %s",
+        gui.str("World generator", "world"),
         settings.generator_name(generation.get_generators()[settings.generator])
     )
     document.name_box.text = settings.name or ''
+    document.name_box.placeholder = world_name_placeholder()
     document.seed_box.text = settings.seed or ''
     document.seed_box.placeholder = tostring(math.random()):sub(3)
 end

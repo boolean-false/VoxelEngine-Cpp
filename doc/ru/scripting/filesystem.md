@@ -36,6 +36,76 @@ toml.parse(code: str) -> table
 
 Парсит TOML строку в таблицу.
 
+## Библиотека yaml
+
+Библиотека содержит функции для сериализации и десериализации таблиц:
+
+```python
+yaml.tostring(object: table) -> str
+```
+
+Сериализует объект в YAML строку.
+
+```python
+yaml.parse(code: str) -> table
+```
+
+Парсит YAML строку в таблицу.
+
+## Библиотека xml
+
+Библиотека содержит функции для сериализации и десериализации XML:
+
+Далее XML как тип данных обозначает Lua-таблицу со следующей структурой:
+- Тег элемента доступен по ключу `#`
+- XML-аттрибуты доступны как пары ключ = значение
+- Вложенные элементы доступны по индексу
+
+Таблица используется как словарь, так и массив.
+
+Пример:
+
+```xml
+<panel size='400' color='0' interval='1' context='menu'>
+    <button onclick='menu.page="worlds"'>@Worlds</button>
+</panel>
+```
+
+Эквивалентная Lua-таблица:
+
+```lua
+{
+    ['#'] = "panel",
+    size = "400",
+    color = "0",
+    interval = "1",
+    context = "menu",
+    {
+        ['#'] = "button",
+        onclick = 'menu.page="worlds"',
+        {
+            "@Worlds"
+        }
+    }
+}
+```
+
+Соответственно, элемент button доступен как `элемент_panel[1]`.
+
+```lua
+-- Сериализует дерево в формате XML
+-- multiline - использовать ли многострочное форматирование
+xml.tostring(data: XML, multiline: bool = true) -> str
+
+-- Парсит XML
+xml.parse(code: str) -> XML
+
+-- Парсит формат VCD (VoxelCore Declaration), используемый форматом VCM.
+-- root_tag - будет неявно создан корневой элемент с указанным тегом,
+-- содержащий все корневые элементы
+xml.parse_vcd(code: str, root_tag: str | nil = nil) -> XML
+```
+
 ## Библиотека bjson
 
 Библиотека содержит функции для работы с двоичным форматом обмена данными [vcbjson](../../specs/binary_json_spec.md).
@@ -47,10 +117,10 @@ bjson.tobytes(
     value: table, 
     -- сжатие
     [опционально] compression: bool=true
-) --> Bytearray
+) -> Bytearray
 
 -- Декодирует массив байт в таблицу
-bjson.frombytes(bytes: table | Bytearray) --> table
+bjson.frombytes(bytes: table | Bytearray) -> table
 ```
 
 ## Сохранение данных в мире

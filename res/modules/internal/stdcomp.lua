@@ -25,12 +25,20 @@ local Rigidbody = {__index={
     get_linear_damping=function(self) return __rigidbody.get_linear_damping(self.eid) end,
     set_linear_damping=function(self, f) return __rigidbody.set_linear_damping(self.eid, f) end,
     is_vdamping=function(self) return __rigidbody.is_vdamping(self.eid) end,
+    get_vdamping=function(self) return __rigidbody.get_vdamping(self.eid) end,
     set_vdamping=function(self, b) return __rigidbody.set_vdamping(self.eid, b) end,
     is_grounded=function(self) return __rigidbody.is_grounded(self.eid) end,
     is_crouching=function(self) return __rigidbody.is_crouching(self.eid) end,
     set_crouching=function(self, b) return __rigidbody.set_crouching(self.eid, b) end,
     get_body_type=function(self) return __rigidbody.get_body_type(self.eid) end,
     set_body_type=function(self, s) return __rigidbody.set_body_type(self.eid, s) end,
+    get_material=function(self) return __rigidbody.get_material(self.eid) end,
+    set_material=function(self, s) return __rigidbody.set_material(self.eid, s) end,
+    get_mass=function(self) return __rigidbody.get_mass(self.eid) end,
+    get_elasticity=function(self) return __rigidbody.get_elasticity(self.eid) end,
+    set_mass=function(self, v) return __rigidbody.set_mass(self.eid, v) end,
+    set_elasticity=function(self, v) return __rigidbody.set_elasticity(self.eid, v) end,
+    get_ground_vel=function(self) return __rigidbody.get_ground_vel(self.eid) end,
 }}
 
 local function new_Rigidbody(eid)
@@ -63,6 +71,13 @@ local Entity = {__index={
     get_skeleton=function(self) return entities.get_skeleton(self.eid) end,
     set_skeleton=function(self, s) return entities.set_skeleton(self.eid, s) end,
     get_component=function(self, name) return self.components[name] end,
+    require_component=function(self, name)
+        local component = self.components[name]
+        if not component then
+            error(("entity has no required component '%s'"):format(name))
+        end
+        return component
+    end,
     has_component=function(self, name) return self.components[name] ~= nil end,
     get_uid=function(self) return self.eid end,
     def_index=function(self) return entities.get_def(self.eid) end,
@@ -114,7 +129,7 @@ return {
                 goto continue
             end
             for _, component in pairs(entity.components) do
-                local callback = component.on_update
+                local callback = rawget(component, "on_update")
                 if not component.__disabled and callback then
                     local result, err = pcall(callback, tps)
                     if err then
@@ -125,10 +140,23 @@ return {
             ::continue::
         end
     end,
+    physics_update = function(delta)
+        for uid, entity in pairs(entities) do
+            for _, component in pairs(entity.components) do
+                local callback = rawget(component, "on_physics_update")
+                if not component.__disabled and callback then
+                    local result, err = pcall(callback, delta)
+                    if err then
+                        debug.error(err)
+                    end
+                end
+            end
+        end
+    end,
     render = function(delta)
         for _,entity in pairs(entities) do
             for _, component in pairs(entity.components) do
-                local callback = component.on_render
+                local callback = rawget(component, "on_render")
                 if not component.__disabled and callback then
                     local result, err = pcall(callback, delta)
                     if err then

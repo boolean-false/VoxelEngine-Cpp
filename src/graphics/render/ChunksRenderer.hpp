@@ -1,20 +1,18 @@
 #pragma once
 
-#include <queue>
+#define GLM_ENABLE_EXPERIMENTAL
+
+#include "util/ThreadPool.hpp"
+#include "commons.hpp"
+
 #include <memory>
 #include <vector>
 #include <unordered_map>
 
 #include <glm/glm.hpp>
-#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/hash.hpp>
 
-#include "voxels/Block.hpp"
-#include "util/ThreadPool.hpp"
-#include "graphics/core/MeshData.hpp"
-#include "commons.hpp"
-
-class Mesh;
+template<typename VertexStructure> class Mesh;
 class Chunk;
 class Level;
 class Camera;
@@ -41,7 +39,39 @@ struct RendererResult {
     ChunkMeshData meshData;
 };
 
+struct RendererJob {
+    std::shared_ptr<Chunk> chunk;
+    std::shared_ptr<VoxelsRenderVolume> volume;
+};
+
 class ChunksRenderer {
+public:
+    ChunksRenderer(
+        const Level& level,
+        const Chunks& chunks,
+        const Assets& assets,
+        const Frustum& frustum,
+        const ContentGfxCache& cache, 
+        const EngineSettings& settings
+    );
+    ~ChunksRenderer();
+
+    void unload(const Chunk* chunk);
+    void clear();
+
+    void drawShadowsPass(
+        const Camera& camera, Shader& shader, const Camera& playerCamera
+    );
+
+    void drawChunks(const Camera& camera, Shader& shader);
+
+    void drawSortedMeshes(const Camera& camera, Shader& shader);
+
+    void update();
+
+    static size_t visibleChunks;
+
+private:
     const Chunks& chunks;
     const Assets& assets;
     const Frustum& frustum;
@@ -51,35 +81,14 @@ class ChunksRenderer {
     std::unordered_map<glm::ivec2, ChunkMesh> meshes;
     std::unordered_map<glm::ivec2, bool> inwork;
     std::vector<ChunksSortEntry> indices;
-    util::ThreadPool<std::shared_ptr<Chunk>, RendererResult> threadPool;
-    const Mesh* retrieveChunk(
-        size_t index, const Camera& camera, Shader& shader, bool culling
-    );
-public:
-    ChunksRenderer(
-        const Level* level,
-        const Chunks& chunks,
-        const Assets& assets,
-        const Frustum& frustum,
-        const ContentGfxCache& cache, 
-        const EngineSettings& settings
-    );
-    virtual ~ChunksRenderer();
+    util::ThreadPool<RendererJob, RendererResult> threadPool;
+    std::vector<glm::ivec2> meshBuildQueue;
 
-    const Mesh* render(
-        const std::shared_ptr<Chunk>& chunk, bool important
-    );
-    void unload(const Chunk* chunk);
-    void clear();
+    size_t enqueuedInFrame = 0;
 
-    const Mesh* getOrRender(
-        const std::shared_ptr<Chunk>& chunk, bool important
-    );
-    void drawChunks(const Camera& camera, Shader& shader);
+    std::shared_ptr<VoxelsRenderVolume> prepareVoxelsVolume(const Chunk& chunk);
 
-    void drawSortedMeshes(const Camera& camera, Shader& shader);
+    void render(const std::shared_ptr<Chunk>& chunk, bool lowPriority);
 
-    void update();
-
-    static size_t visibleChunks;
+    void renderBlocking(const std::shared_ptr<Chunk>& chunk);
 };

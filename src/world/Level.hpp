@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "typedefs.hpp"
+#include "Environment.hpp"
 
 class Content;
 class World;
@@ -17,6 +18,10 @@ class GlobalChunks;
 class Camera;
 class Players;
 struct EngineSettings;
+
+namespace voxels {
+    class Pathfinding;
+}
 
 /// @brief A level, contains chunks and objects
 class Level {
@@ -30,7 +35,9 @@ public:
     std::unique_ptr<LevelEvents> events;
     std::unique_ptr<Entities> entities;
     std::unique_ptr<Players> players;
+    std::unique_ptr<voxels::Pathfinding> pathfinding;
     std::vector<std::shared_ptr<Camera>> cameras;  // move somewhere?
+    Environment environment {};
 
     Level(
         std::unique_ptr<World> world,
@@ -39,9 +46,9 @@ public:
     );
     ~Level();
 
-    World* getWorld();
+    World& getWorld();
 
-    const World* getWorld() const;
+    const World& getWorld() const;
 
     void onSave();
 

@@ -1,21 +1,20 @@
 #include "ServerMainloop.hpp"
 
 #include "Engine.hpp"
-#include "logic/scripting/scripting.hpp"
+#include "devtools/AppScriptsControl.hpp"
 #include "logic/LevelController.hpp"
 #include "interfaces/Process.hpp"
 #include "debug/Logger.hpp"
 #include "world/Level.hpp"
 #include "world/World.hpp"
 #include "util/platform.hpp"
+#include "devtools/Project.hpp"
 
 #include <chrono>
 
 using namespace std::chrono;
 
 static debug::Logger logger("mainloop");
-
-inline constexpr int TPS = 20;
 
 ServerMainloop::ServerMainloop(Engine& engine) : engine(engine) {
 }
@@ -34,22 +33,12 @@ void ServerMainloop::run() {
         setLevel(std::move(level));
     });
 
-    logger.info() << "starting test " << coreParams.scriptFile.string();
-    auto process = scripting::start_coroutine(
-        "script:" + coreParams.scriptFile.filename().u8string()
-    );
-
-    double targetDelta = 1.0 / static_cast<double>(TPS);
+    double targetDelta = 1.0 / static_cast<double>(coreParams.tps);
     double delta = targetDelta;
     auto begin = system_clock::now();
     auto startupTime = begin;
 
-    while (process->isActive()) {
-        if (engine.isQuitSignal()) {
-            process->terminate();
-            logger.info() << "script has been terminated due to quit signal";
-            break;
-        }
+    while (!engine.isQuitSignal() && !engine.getAppScripts().isFinished()) {
         if (coreParams.testMode) {
             time.step(delta);
         } else {
@@ -58,11 +47,11 @@ void ServerMainloop::run() {
                 duration_cast<microseconds>(now - startupTime).count() / 1e6);
             delta = time.getDelta();
         }
-        process->update();
         if (controller) {
-            controller->getLevel()->getWorld()->updateTimers(delta);
+            controller->getLevel()->getWorld().updateTimers(delta);
             controller->update(glm::min(delta, 0.2), false);
         }
+        engine.applicationTick();
         engine.postUpdate();
 
         if (!coreParams.testMode) {
@@ -81,11 +70,10 @@ void ServerMainloop::run() {
 void ServerMainloop::setLevel(std::unique_ptr<Level> level) {
     if (level == nullptr) {
         controller->onWorldQuit();
-        engine.getPaths().setCurrentWorldFolder("");
         controller = nullptr;
     } else {
         controller = std::make_unique<LevelController>(
-            &engine, std::move(level), nullptr
+            engine, std::move(level), nullptr
         );
     }
 }

@@ -1,15 +1,18 @@
 #pragma once
 
 #include <glm/glm.hpp>
-#include <optional>
 #include <string>
 #include <vector>
 #include <array>
+#include <set>
 
 #include "data/dv.hpp"
 #include "maths/UVRegion.hpp"
 #include "maths/aabb.hpp"
 #include "typedefs.hpp"
+#include "util/EnumMetadata.hpp"
+#include "util/stack_vector.hpp"
+#include "interfaces/Serializable.hpp"
 
 struct ParticlesPreset;
 
@@ -32,7 +35,7 @@ inline constexpr uint BLOCK_AABB_GRID = 16;
 
 inline constexpr size_t MAX_USER_BLOCK_FIELDS_SIZE = 240;
 
-inline std::string DEFAULT_MATERIAL = "base:stone";
+inline constexpr int BLOCK_MAX_VARIANTS = 16;
 
 struct BlockFuncsSet {
     bool init : 1;
@@ -43,7 +46,15 @@ struct BlockFuncsSet {
     bool onreplaced : 1;
     bool oninteract : 1;
     bool randupdate : 1;
+    bool onblocktick : 1;
     bool onblockstick : 1;
+    bool onblockpresent : 1;
+    bool onblockremoved : 1;
+};
+
+struct BlockFuncNamesCache {
+    std::string update;
+    std::string randomUpdate;
 };
 
 struct CoordSystem {
@@ -76,46 +87,112 @@ struct BlockRotProfile {
     /// @brief Doors, signs and other panes
     static const BlockRotProfile PANE;
 
+    /// @brief Stairs, stairs and stairs
+    static const BlockRotProfile STAIRS;
+
+    /// @brief Ladders, wall signs, paintings
+    static const BlockRotProfile LADDER;
+
     static inline std::string PIPE_NAME = "pipe";
     static inline std::string PANE_NAME = "pane";
+    static inline std::string STAIRS_NAME = "stairs";
+    static inline std::string LADDER_NAME = "ladder";
 };
 
-enum class BlockModel {
+enum class BlockModelType {
     /// @brief invisible
-    none,
+    NONE,
     /// @brief default cube shape
-    block,
+    BLOCK,
     /// @brief X-shape (grass)
-    xsprite,
+    XSPRITE,
     /// @brief box shape sized as block hitbox
-    aabb,
+    AABB,
     /// @brief custom model defined in json
-    custom
+    CUSTOM
 };
 
-std::string to_string(BlockModel model);
-std::optional<BlockModel> BlockModel_from(std::string_view str);
+struct BlockModel {
+    BlockModelType type = BlockModelType::BLOCK;
+    
+    /// @brief Custom model raw data
+    dv::value customRaw = nullptr;
 
-enum class CullingMode {
+    /// @brief Custom model name (generated or an asset)
+    std::string name = "";
+};
+
+VC_ENUM_METADATA(BlockModelType)
+    {"none", BlockModelType::NONE},
+    {"block", BlockModelType::BLOCK},
+    {"X", BlockModelType::XSPRITE},
+    {"aabb", BlockModelType::AABB},
+    {"custom", BlockModelType::CUSTOM},
+VC_ENUM_END
+
+enum class CullingMode : uint8_t {
     DEFAULT,
     OPTIONAL,
     DISABLED,
 };
 
-std::string to_string(CullingMode mode);
-std::optional<CullingMode> CullingMode_from(std::string_view str);
+VC_ENUM_METADATA(CullingMode)
+    {"default", CullingMode::DEFAULT},
+    {"optional", CullingMode::OPTIONAL},
+    {"disabled", CullingMode::DISABLED},
+VC_ENUM_END
 
-using BoxModel = AABB;
+/// @brief Grounding behaviour for extended blocks
+enum class GroundingBehaviour : uint8_t {
+    /// @brief at least one segment must be grounded
+    PARTIAL,
+    /// @brief all segments must be grounded
+    COMPLETE,
+    /// @brief origin segment must be grounded
+    ORIGIN
+};
+
+VC_ENUM_METADATA(GroundingBehaviour)
+    {"partial", GroundingBehaviour::PARTIAL},
+    {"complete", GroundingBehaviour::COMPLETE},
+    {"origin", GroundingBehaviour::ORIGIN},
+VC_ENUM_END
 
 /// @brief Common kit of block properties applied to groups of blocks
-struct BlockMaterial {
+struct BlockMaterial : Serializable {
     std::string name;
     std::string stepsSound;
     std::string placeSound;
     std::string breakSound;
     std::string hitSound;
+    float soundAbsorption = 0.5f;
 
-    dv::value serialize() const;
+    dv::value toTable() const; // for compatibility
+    dv::value serialize() const override;
+    void deserialize(const dv::value& src) override;
+};
+
+struct Variant {
+    /// @brief Block model
+    BlockModel model {};
+    /// @brief Textures set applied to block sides
+    std::array<std::string, 6> textureFaces;  // -x,x, -y,y, -z,z
+    /// @brief Culling mode
+    CullingMode culling = CullingMode::DEFAULT;
+    /// @brief Influences visible block sides for transparent blocks
+    uint8_t drawGroup = 0;
+
+    struct {
+        /// @brief is the block completely opaque for render
+        bool solid = true;
+    } rt;
+};
+
+struct Variants {
+    uint8_t offset;
+    uint8_t mask;
+    /// First variant is copy of Block::defaults
+    util::stack_vector<Variant, BLOCK_MAX_VARIANTS> variants {};
 };
 
 /// @brief Block properties definition
@@ -126,33 +203,18 @@ public:
 
     std::string caption;
 
-    /// @brief Textures set applied to block sides
-    std::array<std::string, 6> textureFaces;  // -x,x, -y,y, -z,z
+    Variant defaults {};
 
     dv::value properties = nullptr;
 
     /// @brief id of used BlockMaterial, may specify non-existing material
-    std::string material = DEFAULT_MATERIAL;
+    std::string material;
 
     /// @brief Light emission R, G, B, S (sky lights: sun, moon, radioactive
     /// clouds)
     uint8_t emission[4] {0, 0, 0, 0};
 
     glm::i8vec3 size {1, 1, 1};
-
-    /// @brief Influences visible block sides for transparent blocks
-    uint8_t drawGroup = 0;
-
-    /// @brief Block model type
-    BlockModel model = BlockModel::block;
-
-    /// @brief Custom model raw data
-    dv::value customModelRaw = nullptr;
-
-    std::string modelName = "";
-
-    /// @brief Culling mode
-    CullingMode culling = CullingMode::DEFAULT;
 
     /// @brief Does the block passing lights into itself
     bool lightPassing = false;
@@ -192,6 +254,12 @@ public:
     /// @brief Block has semi-transparent texture
     bool translucent = false;
 
+    /// @brief Explicitly overriding 'solid' property if true assigned
+    bool explictlySolid = false;
+
+    /// @brief Grounding behaviour
+    GroundingBehaviour groundingBehaviour = GroundingBehaviour::PARTIAL;
+
     /// @brief Set of block physical hitboxes
     std::vector<AABB> hitboxes {AABB()};
 
@@ -225,18 +293,22 @@ public:
 
     std::unique_ptr<ParticlesPreset> particles;
 
+    std::unique_ptr<Variants> variants;
+
+    std::vector<std::string> tags;
+
     /// @brief Runtime indices (content indexing results)
     struct {
         /// @brief block runtime integer id
         blockid_t id;
 
-        /// @brief is the block completely opaque for render and raycast
+        /// @brief is the block completely opaque for raycast
         bool solid = true;
 
         /// @brief does the block emit any lights
         bool emissive = false;
 
-        // @brief block size is greather than 1x1x1
+        // @brief block size is greater than 1x1x1
         bool extended = false;
 
         /// @brief set of hitboxes sets with all coord-systems precalculated
@@ -249,6 +321,10 @@ public:
         itemid_t pickingItem = 0;
 
         blockid_t surfaceReplacement = 0;
+
+        std::set<int> tags;
+
+        BlockFuncNamesCache eventNames;
     } rt {};
 
     Block(const std::string& name);
@@ -257,6 +333,30 @@ public:
     ~Block();
 
     void cloneTo(Block& dst);
+
+    uint8_t getVariantIndex(uint8_t userbits) const {
+        if (variants == nullptr)
+            return 0;
+        return (userbits >> variants->offset) & variants->mask;
+    }
+
+    const Variant& getVariantByBits(uint8_t userbits) const {
+        if (userbits == 0 || variants == nullptr)
+            return defaults;
+        return variants->variants[
+            (userbits >> variants->offset) & variants->mask
+        ];
+    }
+
+    const Variant& getVariant(uint8_t index) const {
+        if (index == 0)
+            return defaults;
+        return variants->variants[index];
+    }
+
+    const BlockModel& getModel(uint8_t bits) const {
+        return getVariantByBits(bits).model;
+    }
 
     static bool isReservedBlockField(std::string_view view);
 };

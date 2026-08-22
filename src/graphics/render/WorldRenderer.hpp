@@ -1,66 +1,97 @@
 #pragma once
 
-#include <vector>
-#include <memory>
-#include <algorithm>
-#include <GL/glew.h>
-#include <string>
-
-#include <glm/glm.hpp>
-
+#include "commons.hpp"
 #include "typedefs.hpp"
 
 #include "presets/WeatherPreset.hpp"
-#include "world/Weather.hpp"
+#include "window/Camera.hpp"
+#include "util/ObjectsKeeper.hpp"
 
-class Level;
-class Player;
-class Camera;
-class Batch3D;
-class LineBatch;
-class ChunksRenderer;
-class ParticlesRenderer;
-class BlockWrapsRenderer;
-class PrecipitationRenderer;
-class GuidesRenderer;
-class TextsRenderer;
-class Shader;
-class Frustum;
-class Engine;
-class LevelFrontend;
-class Skybox;
-class PostProcessing;
-class DrawContext;
-class ModelBatch;
+#include <vector>
+#include <memory>
+#include <string>
+
 class Assets;
+class Batch3D;
+class BlockWrapsRenderer;
+class ChunksRenderer;
+class DebugLinesRenderer;
+class DrawContext;
+class Engine;
+class Frustum;
+class HandsRenderer;
+class Level;
+class LevelFrontend;
+class LineBatch;
+class ModelBatch;
+class NamedSkeletons;
+class ParticlesRenderer;
+class Player;
+class PostProcessing;
+class PrecipitationRenderer;
+class Shader;
+class Shadows;
+class Skybox;
+class TextsRenderer;
+class CloudsRenderer;
 struct EngineSettings;
+struct Weather;
 
-class WorldRenderer {
+class WorldRenderer final : public util::ObjectsKeeper {
+public:
+    static bool showChunkBorders;
+    static bool showEntitiesDebug;
+
+    WorldRenderer(Engine& engine, LevelFrontend& frontend, Player& player);
+    ~WorldRenderer();
+
+    void update(const Camera& camera, float delta);
+
+    void renderFrame(
+        const DrawContext& context, 
+        Camera& camera, 
+        bool hudVisible,
+        PostProcessing& postProcessing
+    );
+
+    void resetCache();
+
+    void setDebug(bool flag);
+
+    void toggleLightsDebug();
+
+    Weather& getWeather();
+private:
     Engine& engine;
     const Level& level;
     Player& player;
     const Assets& assets;
+    Weather& weather;
     std::unique_ptr<Frustum> frustumCulling;
     std::unique_ptr<LineBatch> lineBatch;
     std::unique_ptr<Batch3D> batch3d;
     std::unique_ptr<ModelBatch> modelBatch;
-    std::unique_ptr<GuidesRenderer> guides;
-    std::unique_ptr<ChunksRenderer> chunks;
+    std::unique_ptr<ChunksRenderer> chunksRenderer;
+    std::unique_ptr<HandsRenderer> hands;
     std::unique_ptr<Skybox> skybox;
-    Weather weather {};
+    std::unique_ptr<Shadows> shadowMapping;
+    std::unique_ptr<DebugLinesRenderer> debugLines;
+    std::unique_ptr<PrecipitationRenderer> precipitation;
+    std::unique_ptr<CloudsRenderer> cloudsRenderer;
     
     float timer = 0.0f;
     bool debug = false;
+    bool lightsDebug = false;
+    bool gbufferPipeline = false;
+    bool dirtySettings = true;
 
     /// @brief Render block selection lines
     void renderBlockSelection();
-
-    void renderHands(const Camera& camera, float delta);
     
     /// @brief Render lines (selection and debug)
     /// @param camera active camera
     /// @param linesShader shader used
-    void renderLines(
+    void renderInWorldLines(
         const Camera& camera, Shader& linesShader, const DrawContext& pctx
     );
 
@@ -72,43 +103,51 @@ class WorldRenderer {
         const EngineSettings& settings,
         float fogFactor
     );
+
+    /// @brief Render opaque pass
+    /// @param context graphics context
+    /// @param camera active camera
+    /// @param settings engine settings
+    void renderOpaque(
+        const DrawContext& context, 
+        const Camera& camera, 
+        const EngineSettings& settings,
+        bool hudVisible
+    );
+
+    void renderOpaquePass(
+        const DrawContext& context,
+        Camera& camera,
+        bool hudVisible,
+        PostProcessing& postProcessing
+    );
+
+    void renderWeatherEffects(Camera& camera);
+
+    void renderHandsPass(const DrawContext& pctx, Camera& camera);
+
+    void renderDebugLines(const DrawContext& context, Camera& camera);
+
+    void renderFrameClassic(
+        const DrawContext& context, 
+        Camera& camera, 
+        bool hudVisible,
+        PostProcessing& postProcessing
+    );
+
+    void renderFrameAdvanced(
+        const DrawContext& context, 
+        Camera& camera, 
+        bool hudVisible,
+        PostProcessing& postProcessing
+    );
+
+    void refreshSettings();
+
+    float calcFogFactor() const;
 public:
     std::unique_ptr<ParticlesRenderer> particles;
     std::unique_ptr<TextsRenderer> texts;
     std::unique_ptr<BlockWrapsRenderer> blockWraps;
-    std::unique_ptr<PrecipitationRenderer> precipitation;
-
-    static bool showChunkBorders;
-    static bool showEntitiesDebug;
-
-    WorldRenderer(Engine& engine, LevelFrontend& frontend, Player& player);
-    ~WorldRenderer();
-
-    void draw(
-        const DrawContext& context, 
-        Camera& camera, 
-        bool hudVisible,
-        bool pause,
-        float delta,
-        PostProcessing& postProcessing
-    );
-
-    /// @brief Render level without diegetic interface
-    /// @param context graphics context
-    /// @param camera active camera
-    /// @param settings engine settings
-    void renderLevel(
-        const DrawContext& context, 
-        const Camera& camera, 
-        const EngineSettings& settings,
-        float delta,
-        bool pause,
-        bool hudVisible
-    );
-
-    void clear();
-
-    void setDebug(bool flag);
-
-    Weather& getWeather();
+    std::unique_ptr<NamedSkeletons> skeletons;
 };

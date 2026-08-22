@@ -10,7 +10,6 @@
 #include <glm/glm.hpp>
 
 class Camera;
-class Block;
 class Assets;
 class Player;
 class Engine;
@@ -18,13 +17,13 @@ class Inventory;
 class LevelFrontend;
 class UiDocument;
 class DrawContext;
-class Viewport;
 class ImageData;
+class Input;
 
 namespace gui {
     class GUI;
+    class Menu;
     class UINode;
-    class Panel;
     class Container;
     class InventoryView;
     class SlotView;
@@ -71,9 +70,11 @@ public:
 
 class Hud : public util::ObjectsKeeper {
     Engine& engine;
+    Input& input;
     Assets& assets;
-    std::unique_ptr<Camera> uicamera;
     gui::GUI& gui;
+    gui::Menu& menu;
+    std::unique_ptr<Camera> uicamera;
     LevelFrontend& frontend;
     Player& player;
 
@@ -92,6 +93,8 @@ class Hud : public util::ObjectsKeeper {
     std::shared_ptr<gui::UINode> debugPanel;
     /// @brief Overlay used in pause mode
     std::shared_ptr<gui::UINode> darkOverlay;
+    /// @brief Overlay used in inventory
+    std::shared_ptr<gui::UINode> inventoryDropArea;
     /// @brief Inventories interaction agent (grabbed item)
     std::shared_ptr<gui::SlotView> exchangeSlot;
     /// @brief Exchange slot inventory (1 slot only)
@@ -127,7 +130,7 @@ class Hud : public util::ObjectsKeeper {
     std::shared_ptr<gui::InventoryView> createHotbar();
 
     void processInput(bool visible);
-    void updateElementsPosition(const Viewport& viewport);
+    void updateElementsPosition(const glm::uvec2& viewport);
     void updateHotbarControl();
     void cleanup();
 
@@ -146,6 +149,8 @@ public:
     /// @brief Check if inventory mode on
     bool isInventoryOpen() const;
 
+    bool isPlayerInventoryOpen() const;
+
     /// @brief Check if pause mode on
     bool isPause() const;
 
@@ -153,7 +158,7 @@ public:
     void setPause(bool pause);
 
     /// @brief Show player inventory in inventory-mode
-    void openInventory();
+    void openInventory(bool playerInventory = true);
 
     /// @brief Show inventory in inventory-mode
     /// @param doc ui layout
@@ -202,6 +207,10 @@ public:
 
     std::shared_ptr<Inventory> getBlockInventory();
 
+    std::shared_ptr<Inventory> getSecondInventory();
+
+    std::shared_ptr<Inventory> getExchangeInventory();
+
     bool isContentAccess() const;
 
     void setContentAccess(bool flag);
@@ -209,6 +218,8 @@ public:
     void setDebugCheats(bool flag);
 
     void setAllowPause(bool flag);
+
+    bool isOpen(const std::string& layoutid) const;
 
     static bool showGeneratorMinimap;
 

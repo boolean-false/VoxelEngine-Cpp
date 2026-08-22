@@ -1,6 +1,7 @@
 # Documentation
 
-Documentation for release 0.27.
+> [!WARNING]
+> Version is in development. Proceed to [Documentation for 0.31.](https://github.com/MihailRis/voxelcore/blob/release-0.31/doc/en/main-page.md)
 
 ## Sections
 
@@ -11,11 +12,13 @@ Documentation for release 0.27.
 - [Console](console.md)
 - [Content-packs](content-packs.md)
 - [Engine usage recommendations](engine-use-recommendations.md)
+- [Entity properties](entity-properties.md)
 - [Item properties](item-properties.md)
 - [Particles](particles.md)
 - [Resources (resources.json)](resources.md)
 - [Rigging](rigging.md)
 - [Scripting](scripting.md)
 - [Text styles](text-styles.md)
+- [VCM models format](vcm.md)
 - [World generator engine](world-generator.md)
 - [XML UI building](xml-ui-layouts.md)

@@ -1,15 +1,15 @@
-#include <filesystem>
-
 #include "engine/Engine.hpp"
-#include "io/io.hpp"
+#include "content/ContentControl.hpp"
 #include "frontend/hud.hpp"
 #include "frontend/screens/Screen.hpp"
 #include "graphics/ui/GUI.hpp"
 #include "graphics/ui/elements/Container.hpp"
-#include "util/stringutil.hpp"
-#include "window/Events.hpp"
-#include "window/input.hpp"
+#include "io/io.hpp"
 #include "libgui.hpp"
+#include "util/stringutil.hpp"
+#include "util/observer_handler.hpp"
+#include "window/input.hpp"
+#include "coders/toml.hpp"
 
 namespace scripting {
     extern Hud* hud;
@@ -31,41 +31,47 @@ static int l_mousecode(lua::State* L) {
 }
 
 static int l_add_callback(lua::State* L) {
+    if (engine->isHeadless())
+        return 0;
     std::string bindname = lua::require_string(L, 1);
     size_t pos = bindname.find(':');
 
     lua::pushvalue(L, 2);
     auto actual_callback = lua::create_simple_handler(L);
-    observer_handler handler;
-    
+    ObserverHandler handler;
+
+    auto& gui = engine->getGUI();
+    auto& input = engine->getInput();
+
     if (pos != std::string::npos) {
         std::string prefix = bindname.substr(0, pos);
         if (prefix == "key") {
             auto key = input_util::keycode_from(bindname.substr(pos + 1));
-            handler = Events::keyCallbacks[key].add(actual_callback);
+            handler = input.addKeyCallback(key, actual_callback);
         }
     }
-    auto callback = [=]() -> bool {
-        if (!scripting::engine->getGUI()->isFocusCaught()) {
+
+    bool isTopLevel = lua::toboolean(L, 4);
+
+    auto callback = [&gui, actual_callback, isTopLevel]() -> bool {
+        if (isTopLevel || !gui.isFocusCaught()) {
             return actual_callback();
         }
         return false;
     };
     if (handler == nullptr) {
-        const auto& bind = Events::bindings.find(bindname);
-        if (bind == Events::bindings.end()) {
-            throw std::runtime_error("unknown binding " + util::quote(bindname));
-        }
-        handler = bind->second.onactived.add(callback);
+        auto& bind = input.getBindings().require(bindname);
+        handler = bind.onactived.add(callback);
     }
 
     if (hud) {
-        hud->keepAlive(handler);
+        hud->keepAlive(std::move(handler));
         return 0;
     } else if (lua::gettop(L) >= 3) {
         auto node = get_document_node(L, 3);
-        if (auto container = std::dynamic_pointer_cast<gui::Container>(node.node)) {
-            container->keepAlive(handler);
+        if (auto container =
+                std::dynamic_pointer_cast<gui::Container>(node.node)) {
+            container->keepAlive(std::move(handler));
             return 0;
         }
         throw std::runtime_error("owner expected to be a container");
@@ -74,11 +80,21 @@ static int l_add_callback(lua::State* L) {
 }
 
 static int l_get_mouse_pos(lua::State* L) {
-    return lua::pushvec2(L, Events::cursor);
+    if (engine->isHeadless())
+        return 0;
+    return lua::pushvec2(L, engine->getInput().getCursor().pos);
+}
+
+static int l_get_mouse_delta(lua::State* L) {
+    if (engine->isHeadless())
+        return 0;
+    return lua::pushvec2(L, engine->getInput().getCursor().delta);
 }
 
 static int l_get_bindings(lua::State* L) {
-    auto& bindings = Events::bindings;
+    if (engine->isHeadless())
+        return 0;
+    const auto& bindings = engine->getInput().getBindings().getAll();
     lua::createtable(L, bindings.size(), 0);
 
     int i = 0;
@@ -91,29 +107,24 @@ static int l_get_bindings(lua::State* L) {
 }
 
 static int l_get_binding_text(lua::State* L) {
+    if (engine->isHeadless())
+        return 0;
     auto bindname = lua::require_string(L, 1);
-    auto index = Events::bindings.find(bindname);
-    
-    if (index == Events::bindings.end()) {
-        throw std::runtime_error("unknown binding " + util::quote(bindname));
-        lua::pushstring(L, "");
-    } else {
-        lua::pushstring(L, index->second.text());
-    }
-
-    return 1;
+    const auto& bind = engine->getInput().getBindings().require(bindname);
+    return lua::pushstring(L, bind.text());
 }
 
 static int l_is_active(lua::State* L) {
+    if (engine->isHeadless())
+        return 0;
     auto bindname = lua::require_string(L, 1);
-    const auto& bind = Events::bindings.find(bindname);
-    if (bind == Events::bindings.end()) {
-        throw std::runtime_error("unknown binding " + util::quote(bindname));
-    }
-    return lua::pushboolean(L, bind->second.active());
+    auto& bind = engine->getInput().getBindings().require(bindname);
+    return lua::pushboolean(L, bind.active());
 }
 
 static int l_is_pressed(lua::State* L) {
+    if (engine->isHeadless())
+        return 0;
     std::string code = lua::require_string(L, 1);
     size_t sep = code.find(':');
     if (sep == std::string::npos) {
@@ -123,12 +134,11 @@ static int l_is_pressed(lua::State* L) {
     auto name = code.substr(sep + 1);
     if (prefix == "key") {
         return lua::pushboolean(
-            L, Events::pressed(static_cast<int>(input_util::keycode_from(name)))
+            L, engine->getInput().pressed(input_util::keycode_from(name))
         );
     } else if (prefix == "mouse") {
         return lua::pushboolean(
-            L,
-            Events::clicked(static_cast<int>(input_util::mousecode_from(name)))
+            L, engine->getInput().clicked(input_util::mousecode_from(name))
         );
     } else {
         throw std::runtime_error("unknown input type " + util::quote(code));
@@ -139,30 +149,29 @@ static void reset_pack_bindings(const io::path& packFolder) {
     auto configFolder = packFolder / "config";
     auto bindsFile = configFolder / "bindings.toml";
     if (io::is_regular_file(bindsFile)) {
-        Events::loadBindings(
-            bindsFile.string(),
-            io::read_string(bindsFile),
+        engine->getInput().getBindings().read(
+            toml::parse(bindsFile.string(), io::read_string(bindsFile)),
             BindType::REBIND
         );
     }
 }
 
 static int l_reset_bindings(lua::State*) {
+    if (engine->isHeadless())
+        return 0;
     reset_pack_bindings("res:");
-    for (auto& pack : engine->getContentPacks()) {
+    for (const auto& pack : content_control->getContentPacks()) {
         reset_pack_bindings(pack.folder);
     }
     return 0;
 }
 
 static int l_set_enabled(lua::State* L) {
+    if (engine->isHeadless())
+        return 0;
     std::string bindname = lua::require_string(L, 1);
-    bool enable = lua::toboolean(L, 2);
-    const auto& bind = Events::bindings.find(bindname);
-    if (bind == Events::bindings.end()) {
-        throw std::runtime_error("unknown binding " + util::quote(bindname));
-    }
-    Events::bindings[bindname].enable = enable;
+    bool enabled = lua::toboolean(L, 2);
+    engine->getInput().getBindings().require(bindname).enabled = enabled;
     return 0;
 }
 
@@ -171,10 +180,12 @@ const luaL_Reg inputlib[] = {
     {"mousecode", lua::wrap<l_mousecode>},
     {"add_callback", lua::wrap<l_add_callback>},
     {"get_mouse_pos", lua::wrap<l_get_mouse_pos>},
+    {"get_mouse_delta", lua::wrap<l_get_mouse_delta>},
     {"get_bindings", lua::wrap<l_get_bindings>},
     {"get_binding_text", lua::wrap<l_get_binding_text>},
     {"is_active", lua::wrap<l_is_active>},
     {"is_pressed", lua::wrap<l_is_pressed>},
     {"reset_bindings", lua::wrap<l_reset_bindings>},
     {"set_enabled", lua::wrap<l_set_enabled>},
-    {NULL, NULL}};
+    {nullptr, nullptr}
+};

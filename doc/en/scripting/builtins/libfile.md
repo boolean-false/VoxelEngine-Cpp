@@ -20,10 +20,10 @@ file.read(path: str) -> str
 Read whole text file.
 
 ```python
-file.read_bytes(path: str) -> array of integers
+file.read_bytes(path: str, [optional] usetable) -> array of integers
 ```
 
-Read file into bytes array.
+Read file into bytes array. If usetable = false , returns Bytearray instead of table.
 
 ```lua
 file.is_writeable(path: str) -> bool
@@ -138,6 +138,12 @@ file.create_zip(directory: str, output_file: str) --> str
 ```
 
 Creates a ZIP archive from the contents of the specified directory.
+
+```lua
+file.create_memory_device() --> str
+```
+
+Creates a memory file system and returns entry point name. Lives until content unload.
 
 ```lua
 file.name(path: str) --> str

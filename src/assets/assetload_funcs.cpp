@@ -1,5 +1,6 @@
 #include "assetload_funcs.hpp"
 
+#include <array>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -10,10 +11,12 @@
 #include "coders/imageio.hpp"
 #include "coders/json.hpp"
 #include "coders/obj.hpp"
+#include "coders/vcm.hpp"
 #include "coders/vec3.hpp"
+#include "coders/vector_fonts.hpp"
 #include "constants.hpp"
 #include "debug/Logger.hpp"
-#include "io/engine_paths.hpp"
+#include "engine/EnginePaths.hpp"
 #include "io/io.hpp"
 #include "frontend/UiDocument.hpp"
 #include "graphics/core/Atlas.hpp"
@@ -34,7 +37,7 @@ namespace fs = std::filesystem;
 
 static bool load_animation(
     Assets* assets,
-    const ResPaths* paths,
+    const ResPaths& paths,
     const std::string& atlasName,
     const std::string& directory,
     const std::string& name,
@@ -43,14 +46,14 @@ static bool load_animation(
 
 assetload::postfunc assetload::texture(
     AssetsLoader*,
-    const ResPaths* paths,
+    const ResPaths& paths,
     const std::string& filename,
     const std::string& name,
     const std::shared_ptr<AssetCfg>&
 ) {
-    auto actualFile = paths->find(filename + ".png");
+    auto actualFile = paths.find(filename + ".png");
     try {
-        std::shared_ptr<ImageData> image(imageio::read(actualFile).release());
+        std::shared_ptr<ImageData> image(imageio::read(actualFile));
         return [name, image, actualFile](auto assets) {
             assets->store(Texture::from(image.get()), name);
         };
@@ -60,31 +63,85 @@ assetload::postfunc assetload::texture(
     }
 }
 
-assetload::postfunc assetload::shader(
-    AssetsLoader*,
-    const ResPaths* paths,
-    const std::string& filename,
-    const std::string& name,
-    const std::shared_ptr<AssetCfg>&
-) {
-    io::path vertexFile = paths->find(filename + ".glslv");
-    io::path fragmentFile = paths->find(filename + ".glslf");
+static auto process_program(const ResPaths& paths, const std::string& filename) {
+    io::path vertexFile = paths.find(filename + ".glslv");
+    io::path fragmentFile = paths.find(filename + ".glslf");
 
     std::string vertexSource = io::read_string(vertexFile);
     std::string fragmentSource = io::read_string(fragmentFile);
 
-    vertexSource = Shader::preprocessor->process(vertexFile, vertexSource);
-    fragmentSource =
-        Shader::preprocessor->process(fragmentFile, fragmentSource);
+    auto& preprocessor = *Shader::preprocessor;
+
+    auto vertex = preprocessor.process(vertexFile, vertexSource, false, {});
+    auto fragment = preprocessor.process(fragmentFile, fragmentSource, false, {});
+    return std::make_pair(vertex, fragment);
+}
+
+static auto read_program(const ResPaths& paths, const std::string& filename) {
+    io::path vertexFile = paths.find(filename + ".glslv");
+    io::path fragmentFile = paths.find(filename + ".glslf");
+    return std::make_pair(
+        io::read_string(vertexFile), io::read_string(fragmentFile)
+    );
+}
+
+assetload::postfunc assetload::shader(
+    AssetsLoader*,
+    const ResPaths& paths,
+    const std::string& filename,
+    const std::string& name,
+    const std::shared_ptr<AssetCfg>&
+) {
+    auto result = read_program(paths, filename);
+    auto vertex = result.first;
+    auto fragment = result.second;
+
+    io::path vertexFile = paths.find(filename + ".glslv");
+    io::path fragmentFile = paths.find(filename + ".glslf");
 
     return [=](auto assets) {
         assets->store(
             Shader::create(
-                vertexFile.string(),
-                fragmentFile.string(),
-                vertexSource,
-                fragmentSource
+                {vertexFile.string(), vertex},
+                {fragmentFile.string(), fragment}
             ),
+            name
+        );
+    };
+}
+
+assetload::postfunc assetload::posteffect(
+    AssetsLoader*,
+    const ResPaths& paths,
+    const std::string& file,
+    const std::string& name,
+    const std::shared_ptr<AssetCfg>& settings
+) {
+    io::path effectFile = paths.find(file + ".glsl");
+    std::string effectSource = io::read_string(effectFile);
+
+    auto& preprocessor = *Shader::preprocessor;
+    preprocessor.addHeader(
+        "__effect__", preprocessor.process(effectFile, effectSource, true, {})
+    );
+
+    auto [vertex, fragment] = process_program(paths, SHADERS_FOLDER + "/effect");
+    auto params = std::move(fragment.params);
+
+    std::string vertexSource = std::move(vertex.code);
+    std::string fragmentSource = std::move(fragment.code);
+
+    return [=](auto assets) {
+        auto program = Shader::create(
+            {effectFile.string(), vertexSource},
+            {effectFile.string(), fragmentSource}
+        );
+        bool advanced = false;
+        if (settings) {
+            advanced = dynamic_cast<const PostEffectCfg*>(settings.get())->advanced;
+        }
+        assets->store(
+            std::make_shared<PostEffect>(advanced, std::move(program), params),
             name
         );
     };
@@ -104,14 +161,14 @@ static bool append_atlas(AtlasBuilder& atlas, const io::path& file) {
 
 assetload::postfunc assetload::atlas(
     AssetsLoader* loader,
-    const ResPaths* paths,
+    const ResPaths& paths,
     const std::string& directory,
     const std::string& name,
     const std::shared_ptr<AssetCfg>& config
 ) {
     auto atlasConfig = std::dynamic_pointer_cast<AtlasCfg>(config);
     if (atlasConfig && atlasConfig->type == AtlasType::SEPARATE) {
-        for (const auto& file : paths->listdir(directory)) {
+        for (const auto& file : paths.listdir(directory)) {
             if (!imageio::is_read_supported(file.extension()))
                 continue;
             loader->add(
@@ -123,12 +180,12 @@ assetload::postfunc assetload::atlas(
         return [](auto){};
     }
     AtlasBuilder builder;
-    for (const auto& file : paths->listdir(directory)) {
+    for (const auto& file : paths.listdir(directory)) {
         if (!imageio::is_read_supported(file.extension())) continue;
         if (!append_atlas(builder, file)) continue;
     }
     std::set<std::string> names = builder.getNames();
-    Atlas* atlas = builder.build(2, false).release();
+    Atlas* atlas = builder.build(ATLAS_EXTRUSION, false).release();
     return [=](auto assets) {
         atlas->prepare();
         assets->store(std::unique_ptr<Atlas>(atlas), name);
@@ -140,15 +197,31 @@ assetload::postfunc assetload::atlas(
 
 assetload::postfunc assetload::font(
     AssetsLoader*,
-    const ResPaths* paths,
+    const ResPaths& paths,
     const std::string& filename,
     const std::string& name,
-    const std::shared_ptr<AssetCfg>&
+    const std::shared_ptr<AssetCfg>& config
 ) {
+    auto cfg = std::dynamic_pointer_cast<FontCfg>(config);
+    auto ext = fs::path(filename).extension().string();
+    if (ext == ".ttf" || ext == ".otf") {
+        logger.info() << "loading vector font " << util::quote(filename);
+        return [=](Assets* assets) {
+            using FontFile = vector_fonts::FontFile;
+            FontFile* fontFile;
+            if ((fontFile = assets->get<FontFile>(filename)) == nullptr) {
+                auto fontFilePtr = vector_fonts::load_font(paths.find(filename).string());
+                fontFile = fontFilePtr.get();
+                assets->store(fontFilePtr, filename);
+            }
+            assets->store(fontFile->createInstance(cfg ? cfg->size : 16), name);
+        };
+    }
+
     auto pages = std::make_shared<std::vector<std::unique_ptr<ImageData>>>();
     for (size_t i = 0; i <= 1024; i++) {
         std::string pagefile = filename + "_" + std::to_string(i) + ".png";
-        auto file = paths->find(pagefile);
+        auto file = paths.find(pagefile);
         if (io::exists(file)) {
             pages->push_back(imageio::read(file));
         } else if (i == 0) {
@@ -158,26 +231,13 @@ assetload::postfunc assetload::font(
         }
     }
     return [=](auto assets) {
-        int res = pages->at(0)->getHeight() / 16;
-        std::vector<std::unique_ptr<Texture>> textures;
-        for (auto& page : *pages) {
-            if (page == nullptr) {
-                textures.emplace_back(nullptr);
-            } else {
-                auto texture = Texture::from(page.get());
-                texture->setMipMapping(false, true);
-                textures.emplace_back(std::move(texture));
-            }
-        }
-        assets->store(
-            std::make_unique<Font>(std::move(textures), res, 4), name
-        );
+        assets->store(Font::createBitmapFont(std::move(*pages)), name);
     };
 }
 
 assetload::postfunc assetload::layout(
     AssetsLoader*,
-    const ResPaths* paths,
+    const ResPaths&,
     const std::string& file,
     const std::string& name,
     const std::shared_ptr<AssetCfg>& config
@@ -189,6 +249,7 @@ assetload::postfunc assetload::layout(
             auto prefix = name.substr(0, pos);
             assets->store(
                 UiDocument::read(
+                    *cfg->gui,
                     cfg->env,
                     name,
                     file,
@@ -205,7 +266,7 @@ assetload::postfunc assetload::layout(
 }
 assetload::postfunc assetload::sound(
     AssetsLoader*,
-    const ResPaths* paths,
+    const ResPaths& paths,
     const std::string& file,
     const std::string& name,
     const std::shared_ptr<AssetCfg>& config
@@ -219,13 +280,13 @@ assetload::postfunc assetload::sound(
     for (size_t i = 0; i < extensions.size(); i++) {
         extension = extensions[i];
         // looking for 'sound_name' as base sound
-        auto soundFile = paths->find(file + extension);
+        auto soundFile = paths.find(file + extension);
         if (io::exists(soundFile)) {
             baseSound = audio::load_sound(soundFile, keepPCM);
             break;
         }
         // looking for 'sound_name_0' as base sound
-        auto variantFile = paths->find(file + "_0" + extension);
+        auto variantFile = paths.find(file + "_0" + extension);
         if (io::exists(variantFile)) {
             baseSound = audio::load_sound(variantFile, keepPCM);
             break;
@@ -238,7 +299,7 @@ assetload::postfunc assetload::sound(
     // loading sound variants
     for (uint i = 1;; i++) {
         auto variantFile =
-            paths->find(file + "_" + std::to_string(i) + extension);
+            paths.find(file + "_" + std::to_string(i) + extension);
         if (!io::exists(variantFile)) {
             break;
         }
@@ -253,7 +314,8 @@ assetload::postfunc assetload::sound(
 
 static void request_textures(AssetsLoader* loader, const model::Model& model) {
     for (auto& mesh : model.meshes) {
-        if (mesh.texture.find('$') == std::string::npos) {
+        if (mesh.texture.find('$') == std::string::npos &&
+            mesh.texture.find(':') == std::string::npos) {
             auto filename = TEXTURES_FOLDER + "/" + mesh.texture;
             loader->add(
                 AssetType::TEXTURE, filename, mesh.texture, nullptr
@@ -264,16 +326,34 @@ static void request_textures(AssetsLoader* loader, const model::Model& model) {
 
 assetload::postfunc assetload::model(
     AssetsLoader* loader,
-    const ResPaths* paths,
+    const ResPaths& paths,
     const std::string& file,
     const std::string& name,
-    const std::shared_ptr<AssetCfg>&
+    const std::shared_ptr<AssetCfg>& config
 ) {
-    auto path = paths->find(file + ".vec3");
+    auto cfg = std::dynamic_pointer_cast<ModelCfg>(config);
+
+    auto path = paths.find(file + ".vec3");
     if (io::exists(path)) {
         auto bytes = io::read_bytes_buffer(path);
         auto modelVEC3 = std::make_shared<vec3::File>(vec3::load(path.string(), bytes));
-        return [loader, name, modelVEC3=std::move(modelVEC3)](Assets* assets) {
+        return [loader, name, cfg, modelVEC3=std::move(modelVEC3)](Assets* assets) {
+            if (cfg && cfg->squashed) {
+                model::Model fullModel;
+                for (auto& entry : modelVEC3->models) {
+                    auto& vec3model = entry.second;
+                    auto& model = vec3model.model;
+                    model.translate(vec3model.origin);
+                    fullModel.merge(std::move(model));
+                }
+                request_textures(loader, fullModel);
+                assets->store(
+                    std::make_unique<model::Model>(fullModel),
+                    name
+                );
+                logger.info() << "store model " << util::quote(name);
+                return;
+            }
             for (auto& [modelName, model] : modelVEC3->models) {
                 request_textures(loader, model.model);
                 std::string fullName = name;
@@ -289,18 +369,109 @@ assetload::postfunc assetload::model(
             }
         };
     }
-    path = paths->find(file + ".obj");
+    path = paths.find(file + ".obj");
+    if (io::exists(path)) {
+        auto text = io::read_string(path);
+        try {
+            auto model = obj::parse(path.string(), text).release();
+            return [=](Assets* assets) {
+                request_textures(loader, *model);
+                assets->store(std::unique_ptr<model::Model>(model), name);
+            };
+        } catch (const parsing_error& err) {
+            std::cerr << err.errorLog() << std::endl;
+            throw;
+        }
+    }
+
+    std::array<std::string, 2> extensions {
+        ".xml",
+        ".vcm"
+    };
+
+    path = "";
+    for (const auto& ext : extensions) {
+        auto newPath = paths.find(file + ext);
+        if (io::exists(newPath)) {
+            path = std::move(newPath);
+            break;
+        }
+    }
+    if (path.empty()) {
+        throw std::runtime_error("could not to find model " + util::quote(file));
+    }
+
     auto text = io::read_string(path);
     try {
-        auto model = obj::parse(path.string(), text).release();
-        return [=](Assets* assets) {
-            request_textures(loader, *model);
-            assets->store(std::unique_ptr<model::Model>(model), name);
-        };
+        auto vcmModel = vcm::parse(path.string(), text, path.extension() == ".xml");
+
+        assert(vcmModel.parts.size() > 0);
+
+        if (vcmModel.parts.size() == 1 || (cfg && cfg->squashed)) {
+            auto modelPtr = std::make_unique<model::Model>(std::move(vcmModel.squash())).release();
+            return [=](Assets* assets) {
+                auto model = std::unique_ptr<model::Model>(modelPtr);
+                request_textures(loader, *model);
+                assets->store(std::move(model), name);
+                logger.info() << "store model " << util::quote(name);
+            };
+        } else {
+            auto vcmModelPtr = std::make_unique<vcm::VcmModel>(std::move(vcmModel)).release();
+            return [=](Assets* assets) {
+                auto vcmModel = std::unique_ptr<vcm::VcmModel>(vcmModelPtr);
+                for (auto& [partName, model] : vcmModel->parts) {
+                    auto fullName = name + "." + partName;
+                    logger.info()
+                        << "store model part " << util::quote(partName)
+                        << " as " << util::quote(fullName);
+                    assets->store(
+                        std::make_unique<model::Model>(std::move(model)),
+                        fullName
+                    );
+                }
+                for (auto& bone : vcmModel->skeleton->getBones()) {
+                    bone->setModel(name + "." + bone->model.name);
+                }
+                logger.info() << "store skeleton " << util::quote(name);
+                assets->store<rigging::SkeletonConfig>(
+                    std::make_unique<rigging::SkeletonConfig>(
+                        std::move(*vcmModel->skeleton)
+                    ),
+                    name
+                );
+            };
+        }
     } catch (const parsing_error& err) {
         std::cerr << err.errorLog() << std::endl;
         throw;
     }
+}
+
+assetload::postfunc assetload::skeleton(
+    AssetsLoader* loader,
+    const ResPaths& paths,
+    const std::string& file,
+    const std::string& name,
+    const std::shared_ptr<AssetCfg>& settings
+) {
+    return [=](auto assets) {
+        auto path = paths.find(file + ".json");
+        std::string text = io::read_string(path);
+        auto skeleton = rigging::SkeletonConfig::parse(text, file, name);
+        for (auto& bone : skeleton->getBones()) {
+            std::string model = bone->model.name;
+            size_t pos = model.rfind('.');
+            if (pos != std::string::npos) {
+                model = model.substr(0, pos);
+            }
+            if (!model.empty()) {
+                loader->add(
+                    AssetType::MODEL, MODELS_FOLDER + "/" + model, model
+                );
+            }
+        }
+        assets->store(std::move(skeleton), name);
+    };
 }
 
 static void read_anim_file(
@@ -383,7 +554,7 @@ inline bool contains(
 
 static bool load_animation(
     Assets* assets,
-    const ResPaths* paths,
+    const ResPaths& paths,
     const std::string& atlasName,
     const std::string& directory,
     const std::string& name,
@@ -391,27 +562,27 @@ static bool load_animation(
 ) {
     std::string animsDir = directory + "/animation";
 
-    for (const auto& folder : paths->listdir(animsDir)) {
+    for (const auto& folder : paths.listdir(animsDir)) {
         if (!io::is_directory(folder)) continue;
         if (folder.name() != name) continue;
         //FIXME: if (fs::is_empty(folder)) continue;
 
         AtlasBuilder builder;
-        append_atlas(builder, paths->find(directory + "/" + name + ".png"));
+        append_atlas(builder, paths.find(directory + "/" + name + ".png"));
 
         std::vector<std::pair<std::string, int>> frameList;
         std::string animFile = folder.string() + "/animation.json";
         if (io::exists(animFile)) {
             read_anim_file(animFile, frameList);
         }
-        for (const auto& file : paths->listdir(animsDir + "/" + name)) {
+        for (const auto& file : paths.listdir(animsDir + "/" + name)) {
             if (!frameList.empty() &&
                 !contains(frameList, file.stem())) {
                 continue;
             }
             if (!append_atlas(builder, file)) continue;
         }
-        auto srcAtlas = builder.build(2, true);
+        auto srcAtlas = builder.build(ATLAS_EXTRUSION, true);
         if (frameList.empty()) {
             for (const auto& frameName : builder.getNames()) {
                 frameList.emplace_back(frameName, 0);

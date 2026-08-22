@@ -2,20 +2,35 @@
 #include "items/Inventories.hpp"
 #include "items/ItemStack.hpp"
 #include "logic/BlocksController.hpp"
+#include "logic/scripting/lua/lua_util.hpp"
 #include "world/Level.hpp"
 #include "api_lua.hpp"
 
 using namespace scripting;
 
 namespace {
+    Level& require_level() {
+        if (level == nullptr) {
+            throw std::runtime_error("world is not open");
+        }
+        return *level;
+    }
+
+    const Content& require_content() {
+        if (content == nullptr) {
+            throw std::runtime_error("content is not initialized");
+        }
+        return *content;
+    }
+
     void validate_itemid(itemid_t id) {
-        if (id >= indices->items.count()) {
+        if (id >= require_content().getIndices()->items.count()) {
             throw std::runtime_error("invalid item id");
         }
     }
 
     Inventory& get_inventory(int64_t id) {
-        auto inv = level->inventories->get(id);
+        auto inv = require_level().inventories->get(id);
         if (inv == nullptr) {
             throw std::runtime_error("inventory not found: " + std::to_string(id));
         }
@@ -23,7 +38,7 @@ namespace {
     }
 
     Inventory& get_inventory(int64_t id, int arg) {
-        auto inv = level->inventories->get(id);
+        auto inv = require_level().inventories->get(id);
         if (inv == nullptr) {
             throw std::runtime_error(
                 "inventory not found: " + std::to_string(id) + " argument " +
@@ -45,6 +60,12 @@ namespace {
 
     template <SlotFunc func>
     int wrap_slot(lua::State* L) {
+        if (lua::isnoneornil(L, 1)) {
+            throw std::runtime_error("inventory id is nil");
+        }
+        if (lua::isnoneornil(L, 2)) {
+            throw std::runtime_error("slot index is nil");
+        }
         auto invid = lua::tointeger(L, 1);
         auto slotid = lua::tointeger(L, 2);
         auto& inv = get_inventory(invid);
@@ -67,6 +88,7 @@ static int l_set(lua::State* L, ItemStack& item) {
     if (!data.isObject() && data != nullptr) {
         throw std::runtime_error("invalid data argument type (table expected)");
     }
+    validate_itemid(itemid);
     item.set(ItemStack(itemid, count, std::move(data)));
     return 0;
 }
@@ -130,7 +152,7 @@ static int l_unbind_block(lua::State* L) {
 
 static int l_create(lua::State* L) {
     auto invsize = lua::tointeger(L, 1);
-    auto inv = level->inventories->create(invsize);
+    auto inv = require_level().inventories->create(invsize);
     if (inv == nullptr) {
         return lua::pushinteger(L, 0);
     }
@@ -139,13 +161,13 @@ static int l_create(lua::State* L) {
 
 static int l_remove(lua::State* L) {
     auto invid = lua::tointeger(L, 1);
-    level->inventories->remove(invid);
+    require_level().inventories->remove(invid);
     return 0;
 }
 
 static int l_clone(lua::State* L) {
     auto id = lua::tointeger(L, 1);
-    auto clone = level->inventories->clone(id);
+    auto clone = require_level().inventories->clone(id);
     if (clone == nullptr) {
         return lua::pushinteger(L, 0);
     }
@@ -159,7 +181,7 @@ static int l_move(lua::State* L) {
     validate_slotid(slotAid, invA);
 
     auto invBid = lua::tointeger(L, 3);
-    auto slotBid = lua::isnil(L, 4) ? -1 : lua::tointeger(L, 4);
+    auto slotBid = lua::isnoneornil(L, 4) ? -1 : lua::tointeger(L, 4);
     auto& invB = get_inventory(invBid, 3);
     auto& slot = invA.getSlot(slotAid);
     if (slotBid == -1) {
@@ -216,6 +238,14 @@ static int l_get_all_data(lua::State* L, ItemStack& stack) {
     return lua::pushvalue(L, stack.getFields());
 }
 
+static int l_set_all_data(lua::State* L, ItemStack& stack) {
+    if (!lua::istable(L, 3)) {
+        throw std::runtime_error("table expected as argument 1");
+    }
+    stack.setFields(lua::tovalue(L, 3), lua::toboolean(L, 4));
+    return 0;
+}
+
 static int l_has_data(lua::State* L, ItemStack& stack) {
     auto key = lua::tostring(L, 3);
     if (key == nullptr) {
@@ -232,9 +262,9 @@ static int l_set_data(lua::State* L, ItemStack& stack) {
 }
 
 const luaL_Reg inventorylib[] = {
-    {"get", wrap_slot<l_get>},
-    {"set", wrap_slot<l_set>},
-    {"set_count", wrap_slot<l_set_count>},
+    {"get", lua::wrap<wrap_slot<l_get>>},
+    {"set", lua::wrap<wrap_slot<l_set>>},
+    {"set_count", lua::wrap<wrap_slot<l_set_count>>},
     {"size", lua::wrap<l_size>},
     {"add", lua::wrap<l_add>},
     {"move", lua::wrap<l_move>},
@@ -243,12 +273,13 @@ const luaL_Reg inventorylib[] = {
     {"get_block", lua::wrap<l_get_block>},
     {"bind_block", lua::wrap<l_bind_block>},
     {"unbind_block", lua::wrap<l_unbind_block>},
-    {"get_data", wrap_slot<l_get_data>},
-    {"set_data", wrap_slot<l_set_data>},
-    {"get_all_data", wrap_slot<l_get_all_data>},
-    {"has_data", wrap_slot<l_has_data>},
+    {"get_data", lua::wrap<wrap_slot<l_get_data>>},
+    {"set_data", lua::wrap<wrap_slot<l_set_data>>},
+    {"get_all_data", lua::wrap<wrap_slot<l_get_all_data>>},
+    {"set_all_data", lua::wrap<wrap_slot<l_set_all_data>>},
+    {"has_data", lua::wrap<wrap_slot<l_has_data>>},
     {"create", lua::wrap<l_create>},
     {"remove", lua::wrap<l_remove>},
     {"clone", lua::wrap<l_clone>},
-    {NULL, NULL}
+    {nullptr, nullptr}
 };
