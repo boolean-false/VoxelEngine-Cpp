@@ -162,11 +162,12 @@ TEST(Crypto, EcdsaVerifiesAllSupportedCurves) {
         const char* opensslCurve;
         const EVP_MD* digest;
         const char* hash;
+        std::size_t coordinateSize;
     };
     const Case cases[] {
-        {"P-256", "prime256v1", EVP_sha256(), "SHA256"},
-        {"P-384", "secp384r1", EVP_sha384(), "SHA384"},
-        {"P-521", "secp521r1", EVP_sha512(), "SHA512"}
+        {"P-256", "prime256v1", EVP_sha256(), "SHA256", 32},
+        {"P-384", "secp384r1", EVP_sha384(), "SHA384", 48},
+        {"P-521", "secp521r1", EVP_sha512(), "SHA512", 66}
     };
     for (const auto& item : cases) {
         SCOPED_TRACE(item.curve);
@@ -175,23 +176,31 @@ TEST(Crypto, EcdsaVerifiesAllSupportedCurves) {
             EVP_PKEY_free
         );
         ASSERT_NE(key, nullptr);
-        std::size_t publicKeySize = 0;
+        BIGNUM* rawX = nullptr;
+        BIGNUM* rawY = nullptr;
         ASSERT_EQ(
-            EVP_PKEY_get_octet_string_param(
-                key.get(), OSSL_PKEY_PARAM_PUB_KEY, nullptr, 0, &publicKeySize
-            ),
-            1
+            EVP_PKEY_get_bn_param(key.get(), OSSL_PKEY_PARAM_EC_PUB_X, &rawX), 1
         );
-        crypto::Bytes publicKey(publicKeySize);
         ASSERT_EQ(
-            EVP_PKEY_get_octet_string_param(
-                key.get(),
-                OSSL_PKEY_PARAM_PUB_KEY,
-                publicKey.data(),
-                publicKey.size(),
-                &publicKeySize
+            EVP_PKEY_get_bn_param(key.get(), OSSL_PKEY_PARAM_EC_PUB_Y, &rawY), 1
+        );
+        std::unique_ptr<BIGNUM, decltype(&BN_free)> x(rawX, BN_free);
+        std::unique_ptr<BIGNUM, decltype(&BN_free)> y(rawY, BN_free);
+        crypto::Bytes publicKey(item.coordinateSize * 2 + 1);
+        publicKey[0] = 0x04;
+        ASSERT_EQ(
+            BN_bn2binpad(
+                x.get(), publicKey.data() + 1, item.coordinateSize
             ),
-            1
+            static_cast<int>(item.coordinateSize)
+        );
+        ASSERT_EQ(
+            BN_bn2binpad(
+                y.get(),
+                publicKey.data() + 1 + item.coordinateSize,
+                item.coordinateSize
+            ),
+            static_cast<int>(item.coordinateSize)
         );
         auto signature = sign(key.get(), item.digest, "message");
         EXPECT_TRUE(
