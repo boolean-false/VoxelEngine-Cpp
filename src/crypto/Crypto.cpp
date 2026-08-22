@@ -811,23 +811,13 @@ namespace crypto {
             ) != static_cast<int>(privateSize)) {
             fail("ECDSA private key encoding failed");
         }
-        std::size_t publicSize = 0;
-        if (EVP_PKEY_get_octet_string_param(
-                key.get(), OSSL_PKEY_PARAM_PUB_KEY, nullptr, 0, &publicSize
-            ) != 1) {
-            fail("ECDSA public key size query failed");
-        }
-        result.publicKey.resize(publicSize);
-        if (EVP_PKEY_get_octet_string_param(
-                key.get(),
-                OSSL_PKEY_PARAM_PUB_KEY,
-                result.publicKey.data(),
-                result.publicKey.size(),
-                &publicSize
-            ) != 1) {
-            fail("ECDSA public key export failed");
-        }
-        result.publicKey.resize(publicSize);
+        result.publicKey = ecPrivateKey(
+            curve,
+            std::string_view(
+                reinterpret_cast<const char*>(result.privateKey.data()),
+                result.privateKey.size()
+            )
+        ).publicKey;
         return result;
     }
 
