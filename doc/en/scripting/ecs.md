@@ -8,7 +8,7 @@ The entity object is available in components as a global variable **entity**.
 -- Deletes an entity (the entity may continue to exist until the frame ends, but will not be displayed in that frame)
 entity:despawn()
 
--- Returns entity defintion index (integer ID)
+-- Returns entity definition index (integer ID)
 entity:def_index() -> int
 
 -- Returns entity definition name (string ID)
@@ -36,6 +36,11 @@ entity:set_enabled(name: str, enable: bool)
 -- At components initialization -1 is also returned,
 -- since the binding occurs after initialization.
 entity:get_player() -> int or nil
+
+-- Checks the 'selectable' property of an entity (raycast opacity)
+body:is_selectable() -> bool
+-- Sets the value of the 'selectable' property of an entity
+body:set_selectable(flag: bool)
 ```
 
 ## Custom Components

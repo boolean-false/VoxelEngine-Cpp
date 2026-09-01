@@ -175,9 +175,10 @@ std::optional<Entities::RaycastResult> Entities::rayCast(
     glm::ivec3 foundNormal;
 
     for (auto [entity, eid, transform, body] : view.each()) {
+        const auto& hitbox = body.hitbox;
         if (eid.uid == settings.ignoredUid || !body.enabled ||
             (settings.solidEntitiesOnly && !eid.def.solid) ||
-            (!eid.def.selectable && !settings.includeNonSelectable)) {
+            (!hitbox.selectable && !settings.includeNonSelectable)) {
             continue;
         }
         if (settings.entitiesFilter) {
@@ -187,7 +188,6 @@ std::optional<Entities::RaycastResult> Entities::rayCast(
                 continue;
             }
         }
-        const auto& hitbox = body.hitbox;
         glm::ivec3 normal;
         double distance;
         if (ray.intersectAABB(
@@ -295,14 +295,13 @@ void Entities::preparePhysics(float delta) {
     auto& physics = *level.physics;
     auto& hitboxes = physics.getHitboxesWriteable();
     auto& solidHitboxes = physics.getSolidHitboxesWriteable();
+    auto& sensors = physics.getSensorsWriteable();
+    sensors.clear();
 
     if (int parts = sensorsTickClock.update(delta)) {
         for (int i = 0; i < parts; i++) {
             auto part = sensorsTickClock.convertPart(i);
             auto allParts = sensorsTickClock.getParts();
-
-            auto& sensors = physics.getSensorsWriteable();
-            sensors.clear();
 
             auto view = registry->view<EntityId, Transform, Rigidbody>();
             for (auto [entity, eid, transform, rigidbody] : view.each()) {
@@ -330,6 +329,7 @@ void Entities::preparePhysics(float delta) {
                             ? rigidbody.mass
                             : std::numeric_limits<float>::infinity();
         rigidbody.hitbox.elasticity = rigidbody.elasticity;
+        rigidbody.hitbox.selectable = rigidbody.selectable;
         hitboxes.emplace_back(&rigidbody.hitbox);
         if (!eid.def.solid) {
             continue;
